@@ -6,7 +6,8 @@ if(!D){document.getElementById('app').textContent='問題データを読み込�
 const KB=Object.assign(Object.create(null),Object.fromEntries(D.questions.map(q=>[q.id,q])));
 const CAT=Object.fromEntries(D.categories.map(c=>[c.id,c]));
 const KEY='gyosei_master_state_v2';
-const TABS=[['dashboard','今日の書斎','◈'],['study','問題演習帖','▤'],['weak','復習と弱点','◎'],['library','問題索引','⌕'],['roppo','六法書架','⚖'],['mock','本試験模試','◷'],['written','記述式対策','✎'],['planner','学習暦','▦'],['records','学習記録','▥'],['settings','設定','⚙']];
+const GUIDE=window.GYOSHI_GUIDE;
+const TABS=[['dashboard','今日の書斎','◈'],['study','問題演習帖','▤'],['weak','復習と弱点','◎'],['library','問題索引','⌕'],['roppo','六法書架','⚖'],['mock','本試験模試','◷'],['written','記述式対策','✎'],['planner','学習暦','▦'],['records','学習記録','▥'],['settings','設定','⚙'],['essentials','これだけは覚える','覚'],['glossary','用語索引','索']];
 const TODAY=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const nextDay=(date,n)=>{const d=new Date(date+'T12:00:00');d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const dateStr=x=>{const d=new Date(x);return isNaN(d.getTime())?'—':`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;};
@@ -16,6 +17,11 @@ const PC=(n,d)=>d?Math.round(n/d*100):0;
 const shuffle=a=>{let x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;};
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
 const routeFromURL=()=>location.hash.slice(1).split('?')[0];
+const glossaryViewFromURL=()=>{
+ const id=new URLSearchParams(location.hash.split('?')[1]||'').get('law');
+ return {search:'',group:'all',law:GUIDE?.lawKey(id)||'all'};
+};
+const questionSearchText=q=>fold([q.q,q.t,q.x,q.r,q.ref,q.s,...(q.type==='mc'?q.o:[])].filter(Boolean).join(' '));
 const validOrder=(order,n)=>Array.isArray(order)&&order.length===n&&new Set(order).size===n&&order.every(i=>Number.isInteger(i)&&i>=0&&i<n);
 function cleanAnswer(id,value){
  const type=KB[id].type;
@@ -23,7 +29,7 @@ function cleanAnswer(id,value){
  if(type==='mc')return Number.isInteger(value)&&value>=0&&value<5?value:null;
  return Array.isArray(value)?Array.from({length:4},(_,i)=>Number.isInteger(value[i])&&value[i]>=0&&value[i]<20?value[i]:null):null;
 }
-const blank=()=>({settings:{goal:20,target:'2027-11-14',theme:'light',instant:true,dailyMinutes:45,readable:false},progress:{},bookmarks:[],notes:{},flags:[],logs:[],history:[],exam:null,archivedExams:[],practice:null});
+const blank=()=>({settings:{goal:20,target:'2027-11-14',theme:'light',instant:true,dailyMinutes:45,readable:false},progress:{},bookmarks:[],notes:{},flags:[],logs:[],history:[],exam:null,archivedExams:[],practice:null,essentials:{}});
 let storageOK=true;
 function normalized(source){
   const b=blank();if(!source||typeof source!=='object'||Array.isArray(source))return b;
@@ -35,6 +41,7 @@ function normalized(source){
     if(!KB[id]||!p||typeof p!=='object')continue;
     b.progress[id]={seen:cap(Number(p.seen)||0,0,100000),correct:cap(Number(p.correct)||0,0,100000),wrong:cap(Number(p.wrong)||0,0,100000),streak:cap(Number(p.streak)||0,0,100),due:typeof p.due==='string'?p.due:TODAY(),last:typeof p.last==='string'?p.last:'',lastOk:p.lastOk===true,ease:cap(Number(p.ease)||2.5,1.3,3.2),interval:cap(Number(p.interval)||0,0,3650),lapses:cap(Number(p.lapses)||0,0,100000),lastRatio:cap(Number(p.lastRatio)||0,0,1),lastConfidence:cap(Number(p.lastConfidence)||2,1,3),lastMs:cap(Number(p.lastMs)||0,0,86400000)};
   }
+  b.essentials=GUIDE?.cleanProgress(source.essentials)||{};
   b.bookmarks=Array.isArray(source.bookmarks)?[...new Set(source.bookmarks.filter(id=>KB[id]))].slice(0,2000):[];
   b.notes=source.notes&&typeof source.notes==='object'&&!Array.isArray(source.notes)?Object.fromEntries(Object.entries(source.notes).filter(([id,v])=>KB[id]&&typeof v==='string').slice(0,2000).map(([id,v])=>[id,v.slice(0,4000)])):{};
   b.flags=Array.isArray(source.flags)?[...new Set(source.flags.filter(id=>KB[id]))].slice(0,2000):[];
@@ -59,7 +66,7 @@ function save(data=state){
  catch(err){storageOK=false;return false;}
 }
 let route=routeFromURL();if(!TABS.some(t=>t[0]===route))route='dashboard';
-let ui={sidebar:false,modal:null,practice:state.practice,results:null,study:{c:'all',type:'mc',mode:'adaptive',count:10,difficulty:'all',search:'',timer:0},weakTab:'wrong',weakSearch:'',recordTab:'overview',examReview:false,library:{search:'',c:'all',type:'all',filter:'all',page:1,sort:'subject'},archiveViewing:null};
+let ui={sidebar:false,modal:null,practice:state.practice,results:null,study:{c:'all',type:'mc',mode:'adaptive',count:10,difficulty:'all',search:'',timer:0},weakTab:'wrong',weakSearch:'',recordTab:'overview',examReview:false,library:{search:'',c:'all',type:'all',filter:'all',page:1,sort:'subject'},archiveViewing:null,guide:{group:'all',status:'all',openCards:new Set()},glossary:glossaryViewFromURL()};
 const app=document.getElementById('app');
 const catChip=(id)=>{const c=CAT[id];return `<span class="pill" style="color:${c.color};border-color:${c.color}45">${E(c.name)}</span>`;};
 function categoryStats(){return D.categories.map(c=>{const qids=D.questions.filter(q=>q.c===c.id).map(q=>q.id);const ls=state.logs.filter(l=>qids.includes(l.id));return {...c,total:qids.length,seen:qids.filter(id=>state.progress[id]?.seen>0).length,attempts:ls.length,ratio:PC(ls.reduce((x,l)=>x+l.ratio,0),ls.length),due:qids.filter(id=>state.progress[id]?.due<=TODAY()).length};});}
@@ -97,13 +104,15 @@ function replaceHash(next){if(routeFromURL()!==next)history.pushState(null,'','#
 function go(next){
  if(route==='roppo'&&next!=='roppo')window.GYOSHI_ROPPO?.stop();
   if(!TABS.some(t=>t[0]===next))return;
-  route=next;replaceHash(next);ui.sidebar=false;ui.modal=null;render();window.scrollTo(0,0);
+  route=next;replaceHash(next);
+ if(next==='glossary')ui.glossary=glossaryViewFromURL();
+ ui.sidebar=false;ui.modal=null;render();window.scrollTo(0,0);
  document.getElementById('content').focus({preventScroll:true});
 }
 function activeTab(x){return route===x?'active':'';}
 function navButton(t){return `<button class="nav-btn ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}" aria-current="${route===t[0]?'page':'false'}"><span class="ico">${t[2]}</span><span>${t[1]}</span></button>`;}
 function mount(){
- app.innerHTML=`<div class="layout"><a class="skip-content" href="#content" data-action="skipContent">本文へ移動</a><div class="side-scrim" id="scrim" data-action="closeSide"></div><aside class="sidebar" id="sidebar" aria-label="メインナビゲーション"><div class="brand"><div class="brand-mark">朱</div><div><div class="brand-title">朱引文庫</div><div class="brand-sub">SHUBIKI BUNKO <span>／ 2027</span></div><div class="brand-caption">行政書士試験のための書斎</div></div></div><div class="side-section">学習</div><nav class="side-nav">${TABS.slice(0,5).map(navButton).join('')}</nav><div class="side-section">試験対策</div><nav class="side-nav">${TABS.slice(5,8).map(navButton).join('')}</nav><div class="side-section">学習記録</div><nav class="side-nav">${TABS.slice(8).map(navButton).join('')}</nav><div class="side-bottom"><div class="side-daily"><div class="side-daily-label">今日の学習目標</div><div class="side-daily-value" id="side-daily-count">0 <span>/ ${state.settings.goal}問</span></div><div class="progress-track"><div class="progress-fill" id="side-daily-bar" style="width:0%"></div></div><p class="tiny" id="side-daily-desc" style="margin:11px 0 0;color:#9cb0be">今日も少しずつ積み重ねましょう</p></div><div class="side-note"><span class="side-note-mark">朱</span><span>一問一葉、知を綴る。<small>OFFLINE STUDY · PRIVATE ARCHIVE</small></span></div></div></aside><div class="shell"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">☰</button><div><div class="topbar-kicker">朱引文庫</div><div id="top-title" class="topbar-title">ダッシュボード</div></div></div><div class="top-actions"><span class="network-chip" id="network-state" aria-label="接続状況">●</span><span class="date-chip" id="header-date">${dateStr(Date.now())}</span><button class="icon-btn" data-action="theme" title="テーマ変更" aria-label="ダークモード切替">◐</button><button class="icon-btn" data-action="nav" data-value="settings" title="設定" aria-label="設定を開く">⚙</button></div></header><main class="content" id="content" tabindex="-1"></main><footer class="main-footer"><span class="footer-brand">朱引文庫 <small>— SHUBIKI BUNKO —</small></span> · 自作学習問題 ${D.questions.length}問 · <a href="https://www.gyosei-shiken.or.jp/doc/guide/guide.html" target="_blank" rel="noopener noreferrer">公式試験案内</a> · 令和8年度試験の情報を基礎にしています。法令改正・判例の最新情報は必ず一次資料を確認してください。<br>問題は独自作成の学習用で、公式過去問の転載ではありません。試験の合否を保証するものではありません。</footer></div><nav class="mobile-nav" aria-label="モバイルナビゲーション">${[TABS[0],TABS[1],TABS[2],TABS[4],TABS[5]].map(t=>`<button class="mobile-tab ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}"><span class="ico">${t[2]}</span>${({dashboard:'書斎',study:'演習',weak:'復習',roppo:'六法',mock:'模試'})[t[0]]||t[1]}</button>`).join('')}</nav><div id="toasts" class="toast-region" aria-live="polite"></div><div id="modal-host"></div><input type="file" accept=".json,application/json" id="import-file" hidden></div>`;
+ app.innerHTML=`<div class="layout"><a class="skip-content" href="#content" data-action="skipContent">本文へ移動</a><div class="side-scrim" id="scrim" data-action="closeSide"></div><aside class="sidebar" id="sidebar" aria-label="メインナビゲーション"><div class="brand"><div class="brand-mark">朱</div><div><div class="brand-title">朱引文庫</div><div class="brand-sub">SHUBIKI BUNKO <span>／ 2027</span></div><div class="brand-caption">行政書士試験のための書斎</div></div></div><div class="side-section">学習</div><nav class="side-nav">${[TABS[0],TABS[10],...TABS.slice(1,5),TABS[11]].map(navButton).join('')}</nav><div class="side-section">試験対策</div><nav class="side-nav">${TABS.slice(5,8).map(navButton).join('')}</nav><div class="side-section">学習記録</div><nav class="side-nav">${TABS.slice(8,10).map(navButton).join('')}</nav><div class="side-bottom"><div class="side-daily"><div class="side-daily-label">今日の学習目標</div><div class="side-daily-value" id="side-daily-count">0 <span>/ ${state.settings.goal}問</span></div><div class="progress-track"><div class="progress-fill" id="side-daily-bar" style="width:0%"></div></div><p class="tiny" id="side-daily-desc" style="margin:11px 0 0;color:#9cb0be">今日も少しずつ積み重ねましょう</p></div><div class="side-note"><span class="side-note-mark">朱</span><span>一問一葉、知を綴る。<small>OFFLINE STUDY · PRIVATE ARCHIVE</small></span></div></div></aside><div class="shell"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">☰</button><div><div class="topbar-kicker">朱引文庫</div><div id="top-title" class="topbar-title">ダッシュボード</div></div></div><div class="top-actions"><span class="network-chip" id="network-state" aria-label="接続状況">●</span><span class="date-chip" id="header-date">${dateStr(Date.now())}</span><button class="icon-btn" data-action="theme" title="テーマ変更" aria-label="ダークモード切替">◐</button><button class="icon-btn" data-action="nav" data-value="settings" title="設定" aria-label="設定を開く">⚙</button></div></header><main class="content" id="content" tabindex="-1"></main><footer class="main-footer"><span class="footer-brand">朱引文庫 <small>— SHUBIKI BUNKO —</small></span> · 自作学習問題 ${D.questions.length}問 · <a href="https://www.gyosei-shiken.or.jp/doc/guide/guide.html" target="_blank" rel="noopener noreferrer">公式試験案内</a> · 令和8年度試験の情報を基礎にしています。法令改正・判例の最新情報は必ず一次資料を確認してください。<br>問題は独自作成の学習用で、公式過去問の転載ではありません。試験の合否を保証するものではありません。</footer></div><nav class="mobile-nav" aria-label="モバイルナビゲーション">${[TABS[0],TABS[10],TABS[1],TABS[2],TABS[4],TABS[5]].map(t=>`<button class="mobile-tab ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}"><span class="ico">${t[2]}</span>${({dashboard:'書斎',essentials:'これだけ',study:'演習',weak:'復習',roppo:'六法',mock:'模試'})[t[0]]||t[1]}</button>`).join('')}</nav><div id="toasts" class="toast-region" aria-live="polite"></div><div id="modal-host"></div><input type="file" accept=".json,application/json" id="import-file" hidden></div>`;
 }
 function render(options={}){
  const y=options.keepScroll?window.scrollY:0;
@@ -118,7 +127,7 @@ function render(options={}){
  const title=TABS.find(t=>t[0]===route)?.[1]||'ダッシュボード';document.getElementById('top-title').textContent=title;document.title=title+'｜朱引文庫 — 行政書士試験の書斎';
  document.getElementById('sidebar').classList.toggle('open',ui.sidebar);document.getElementById('scrim').classList.toggle('show',ui.sidebar);
  const content=document.getElementById('content');
- switch(route){case'dashboard':content.innerHTML=homeHTML()+dashboardEnhancementsHTML();break;case'study':content.innerHTML=ui.practice?practiceHTML():studyHTML();break;case'weak':content.innerHTML=weakHTML();break;case'library':content.innerHTML=libraryHTML();break;case'roppo':content.innerHTML=window.GYOSHI_ROPPO?.render()||'<p>六法ライブラリを読み込めません。</p>';break;case'planner':content.innerHTML=plannerHTML();break;case'mock':content.innerHTML=mockHTML()+(state.exam&&!state.exam.finished?'':mockArchiveShortcutHTML());break;case'written':content.innerHTML=writtenHTML();break;case'records':content.innerHTML=ui.archiveViewing?archivedMockHTML():recordsHTML()+recordsEnhancementsHTML();break;case'settings':content.innerHTML=settingsHTML()+advancedSettingsHTML();break;}
+ switch(route){case'dashboard':content.innerHTML=homeHTML()+dashboardEnhancementsHTML();break;case'study':content.innerHTML=ui.practice?practiceHTML():studyHTML();break;case'weak':content.innerHTML=weakHTML();break;case'library':content.innerHTML=libraryHTML();break;case'roppo':content.innerHTML=window.GYOSHI_ROPPO?.render()||'<p>六法ライブラリを読み込めません。</p>';break;case'essentials':content.innerHTML=GUIDE?.essentialsHTML(state.essentials,ui.guide)||'<p>必修カードを読み込めません。</p>';break;case'glossary':content.innerHTML=GUIDE?.glossaryHTML(ui.glossary)||'<p>用語索引を読み込めません。</p>';break;case'planner':content.innerHTML=plannerHTML();break;case'mock':content.innerHTML=mockHTML()+(state.exam&&!state.exam.finished?'':mockArchiveShortcutHTML());break;case'written':content.innerHTML=writtenHTML();break;case'records':content.innerHTML=ui.archiveViewing?archivedMockHTML():recordsHTML()+recordsEnhancementsHTML();break;case'settings':content.innerHTML=settingsHTML()+advancedSettingsHTML();break;}
  document.getElementById('side-daily-count').innerHTML=`${doneToday()} <span>/ ${state.settings.goal}問</span>`;
  document.getElementById('side-daily-bar').style.width=cap(PC(doneToday(),state.settings.goal),0,100)+'%';
  document.getElementById('side-daily-desc').textContent=doneToday()>=state.settings.goal?'今日の目標達成！':'残り '+Math.max(0,state.settings.goal-doneToday())+' 問で目標達成';
@@ -150,6 +159,7 @@ function homeHTML(){
   <div class="hero-art" aria-hidden="true"><div class="art-disc"></div><div class="art-leaf-back"><span>行政書士試験</span><b>積學</b><i>法のことばを、一葉ずつ。</i></div><div class="art-leaf-front"><span>壱・条文</span><strong>六法</strong><small>書架と朱引き</small></div><div class="art-seal">朱引<br>文庫</div><div class="art-rubric">覚えるよりも、理解する。</div></div>
   <div class="hero-bottom"><span>目標試験日まで ${left}日</span><span>法令本文15本収録</span></div>
 </section>
+ <a class="sg-home-link" href="#essentials"><span><strong>これだけは覚える</strong><span>必修カードで条文・期限・記述式の要点を確認</span></span><span aria-hidden="true">→</span></a>
  <div class="stats-grid">${statCard('累計解答数',ans.toLocaleString('ja-JP'),'問',`全${D.questions.length}問のオリジナル問題`,'▤')}${statCard('平均得点率',accuracy,'%','多肢・記述は配点比率を反映','◉')}${statCard('連続学習日数',daysStreak(),'日','学習した日を連続カウント','♨')}${statCard('復習対象',due,'問',`${wr}問が直近の誤答`,'↻')}</div>
  <div class="two-col"><div class="card"><div class="card-head"><h2>科目別の習熟状況</h2><button class="text-link" data-action="nav" data-value="records">詳しく見る →</button></div>${s.map(subjectRow).join('')}</div><div style="display:grid;gap:18px"><div class="card"><div class="card-head"><h2>直近7日間の学習</h2><span class="pill">${byDay.reduce((a,d)=>a+d.count,0)}問</span></div>${chart}</div><div class="card"><div class="card-head"><h2>合格に向けた学習指標</h2></div><div class="tip-list"><div class="tip"><div class="tip-circle">◷</div><div><strong>目標試験日まで ${left}日</strong><span>${E(state.settings.target.replaceAll('-','/'))}（変更可能な仮設定）</span></div></div><div class="tip"><div class="tip-circle">◎</div><div><strong>学習済み ${seen} / ${D.questions.length}問</strong><span>初回学習の広さと復習の深さを両方重視</span></div></div><div class="tip"><div class="tip-circle">↻</div><div><strong>復習予定 ${due}問</strong><span>誤答と自信が低い問題を優先して取り組みましょう</span></div></div></div></div></div></div>
  ${ui.practice&&!ui.practice.finished?`<div class="resume-alert"><div><strong>前回の演習が残っています</strong><div class="small muted">問題 ${ui.practice.index+1}/${ui.practice.items.length} · 解答済み ${ui.practice.results.length}問${ui.practice.deadline?' · 時間制限あり':''}</div></div><button class="button secondary small" data-action="nav" data-value="study">続きから再開 →</button></div>`:''}${sectionHead('科目から学習する','科目を選択すると、指定科目の演習を開始できます。')}<div class="category-grid">${s.map(c=>`<button class="category-tile" data-action="studyCategory" data-value="${c.id}"><span class="subject-badge" style="width:42px;height:42px;color:${c.color};background:${c.color}1e">${c.name.charAt(0)}</span><span style="min-width:0"><strong>${E(c.name)}</strong><div class="small">${c.total}問収録 · ${c.seen}問学習済み</div></span><span style="margin-left:auto;color:var(--muted)">›</span></button>`).join('')}</div>
@@ -378,7 +388,7 @@ function libraryHTML(){
  if(L.filter==='flag')xs=xs.filter(q=>state.flags.includes(q.id));
  if(L.filter==='note')xs=xs.filter(q=>Boolean(state.notes[q.id]?.trim()));
  if(L.filter==='advanced')xs=xs.filter(q=>q.advanced);
- if(L.search){const term=fold(L.search);xs=xs.filter(q=>fold([q.q,q.t,q.x,q.r,q.ref,q.s,...(q.type==='mc'?q.o:[])].filter(Boolean).join(' ')).includes(term));}
+ if(L.search){const term=fold(L.search);xs=xs.filter(q=>questionSearchText(q).includes(term));}
  if(L.sort==='difficult')xs.sort((a,b)=>b.l-a.l||a.id.localeCompare(b.id));
  else if(L.sort==='due')xs.sort((a,b)=>(state.progress[a.id]?.due||'9999').localeCompare(state.progress[b.id]?.due||'9999'));
  else if(L.sort==='recent')xs.sort((a,b)=>a.id.localeCompare(b.id)*-1);
@@ -431,6 +441,25 @@ function clickAction(ev){const b=ev.target.closest('[data-action]');if(!b)return
  switch(a){
   case 'skipContent':ev.preventDefault();document.getElementById('content').focus();break;
   case 'nav':ui.archiveViewing=null;go(v);break;
+  case 'guideMark':{
+   if(!GUIDE?.getCard(id)||!['known','review'].includes(v))break;
+   const progress={...state.essentials};
+   if(progress[id]===v)delete progress[id];else progress[id]=v;
+   if(!save({...state,essentials:progress})){toast('学習状態を端末に保存できませんでした。');break;}
+   state.essentials=progress;
+   ui.guide.openCards.add(id);
+   render({keepScroll:true});
+   if(!document.getElementById(b.id))document.getElementById('sg-progress')?.focus();
+   break;
+  }
+  case 'guidePractice':{
+   const card=GUIDE?.getCard(id);
+   if(!card)break;
+   const [c,keyword,type='all']=card.practice;
+   const matches=keyword&&D.questions.some(q=>q.c===c&&(type==='all'||q.type===type)&&questionSearchText(q).includes(fold(keyword)));
+   ui.library={search:matches?keyword:'',c,type,filter:'all',page:1,sort:'subject'};
+   go('library');break;
+  }
   case 'libraryFilter':ui.library.filter=v;ui.library.page=1;render({keepScroll:true});break;
   case 'librarySort':ui.library.sort=v;ui.library.page=1;render({keepScroll:true});break;
   case 'libraryPage':ui.library.page=Math.max(1,Number(v)||1);render();window.scrollTo(0,0);break;
@@ -494,6 +523,10 @@ function changeAction(ev){const el=ev.target,a=el.dataset.action,field=el.datase
  case 'practiceMulti':{const it=practiceItem();if(!it||it.checked)break;if(!Array.isArray(it.answer))it.answer=[null,null,null,null];it.answer[Number(el.dataset.slot)]=el.value===''?null:Number(el.value);persistPractice();break;}
  case 'examMulti':{const ex=state.exam;if(!ex||ex.finished)return;if(secondsLeft(ex)<=0){finishMock(true);return;}const it=ex.items[ex.index];if(!Array.isArray(it.answer))it.answer=[null,null,null,null];it.answer[Number(el.dataset.slot)]=el.value===''?null:Number(el.value);save();break;}
  case 'weakSearch':ui.weakSearch=el.value.trim().slice(0,200);render({keepScroll:true});break;
+ case 'guideGroup':ui.guide.group=el.value;render({keepScroll:true});break;
+ case 'guideStatus':ui.guide.status=el.value;render({keepScroll:true});break;
+ case 'glossaryGroup':ui.glossary.group=el.value;updateGlossaryResults();break;
+ case 'glossaryLaw':ui.glossary.law=el.value;updateGlossaryResults();break;
  case 'libraryType':ui.library.type=el.value;ui.library.page=1;render({keepScroll:true});break;
  case 'libraryCat':ui.library.c=el.value;ui.library.page=1;render({keepScroll:true});break;
  case 'settingDailyMinutes':state.settings.dailyMinutes=cap(Number(el.value)||45,10,240);save();render({keepScroll:true});break;
@@ -504,7 +537,14 @@ function changeAction(ev){const el=ev.target,a=el.dataset.action,field=el.datase
  }
  if(el.id==='import-file'){const f=el.files?.[0];if(f)importData(f);el.value='';}
 }
+function updateGlossaryResults(){
+ const container=document.getElementById('sg-index-results');
+ if(container)container.innerHTML=GUIDE.glossaryResults(ui.glossary);
+}
 function inputAction(ev){const el=ev.target,a=el.dataset.action;
+ if(!ev.isComposing&&a==='glossarySearch'&&ui.glossary.search!==el.value.slice(0,100)){
+  ui.glossary.search=el.value.slice(0,100);updateGlossaryResults();
+ }
  if(!ev.isComposing&&a==='librarySearch'&&ui.library.search!==el.value.slice(0,120)){
   ui.library.search=el.value.slice(0,120);ui.library.page=1;render({keepScroll:true});
  }
@@ -527,6 +567,11 @@ function keyboard(ev){if(ev.key==='Escape'&&ui.modal){ui.modal=null;render({keep
   if(ev.key==='ArrowLeft'){ex.index=Math.max(0,ex.index-1);save();render();window.scrollTo(0,0);ev.preventDefault();}
  }
 }
+app.addEventListener('toggle',event=>{
+ const id=event.target.dataset?.guideCard;
+ if(!id||!app.contains(event.target))return;
+ if(event.target.open)ui.guide.openCards.add(id);else ui.guide.openCards.delete(id);
+},true);
 app.addEventListener('click',clickAction);
 app.addEventListener('change',changeAction);
 app.addEventListener('input',inputAction);
@@ -536,7 +581,9 @@ window.addEventListener('hashchange',()=>{
  const next=routeFromURL()||'dashboard';
  if(!TABS.some(tab=>tab[0]===next))return;
  if(route==='roppo'&&next!=='roppo')window.GYOSHI_ROPPO?.stop();
- route=next;ui.modal=null;ui.sidebar=false;render();window.scrollTo(0,0);
+ route=next;ui.modal=null;ui.sidebar=false;
+ if(next==='glossary')ui.glossary=glossaryViewFromURL();
+ render();window.scrollTo(0,0);
 });
 window.addEventListener('visibilitychange',()=>{if(document.hidden)return;if(route==='mock'&&state.exam&&!state.exam.finished&&secondsLeft(state.exam)<=0)finishMock(true);if(route==='study'&&ui.practice&&!ui.practice.finished&&ui.practice.deadline&&Date.now()>=ui.practice.deadline)finishTimedPractice();});window.addEventListener('online',()=>{const e=document.getElementById('network-state');if(e){e.textContent='● 接続中';e.dataset.offline='false';}});window.addEventListener('offline',()=>{const e=document.getElementById('network-state');if(e){e.textContent='○ オフライン';e.dataset.offline='true';}});
 setInterval(()=>{if(route==='study'&&ui.practice&&!ui.practice.finished&&ui.practice.deadline){const sec=Math.max(0,Math.ceil((ui.practice.deadline-Date.now())/1000));const t=document.getElementById('practice-clock');if(t)t.textContent='残り '+clockText(sec);if(sec<=0)finishTimedPractice();}if(route!=='mock'||!state.exam||state.exam.finished)return;const sec=secondsLeft(state.exam);const el=document.getElementById('live-clock');if(el)el.textContent=clockText(sec);if(sec<=0)finishMock(true);},1000);

@@ -32,6 +32,7 @@ const NF=n=>Number(n||0).toLocaleString('ja-JP');
 const COLORS=['yellow','mint','pink','blue'];
 const EDITION=window.GYOSHI_EDITION;
 const LAW_VOICE=window.GYOSHI_LAW_VOICE;
+const GUIDE=window.GYOSHI_GUIDE;
 const readerRoute=()=>location.hash.split('?')[0]==='#roppo';
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
 const articlePattern=/^(preamble|main-[0-9_]+|suppl-[0-9]+-([0-9_]+|text)|appendix-[0-9]+|section-[0-9]+)$/;
@@ -460,6 +461,7 @@ function articleHTML(a){
  const marked=meta.marks.filter(m=>m.lawId===s.lawId&&m.articleId===a.id),book=meta.bookmarks.includes(bid(s.lawId,a.id));
  const key=bid(s.lawId,a.id),noteText=meta.notes[key]||'',noteOpen=s.noteIds.has(key);
  return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}" tabindex="-1"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${ESC(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${ESC(a.caption)}</div>`:''}<h3>${ESC(a.title)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="条文のしおり" aria-pressed="${book}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモ" aria-expanded="${noteOpen}">✎</button><button class="rp-mini" data-rp="copy-link" data-id="${ESC(a.id)}" aria-label="${ESC(a.title)}へのリンクをコピー" title="条文リンク">↗</button></div></div>
+ ${GUIDE?.forArticle(s.lawId,a)||''}
  <div class="rp-article-body">${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b.t)}</p>`).join('')}</div>
  <div class="rp-article-foot" ${marked.length?'':'hidden'}><span>${marked.length?`<span class="rp-foot-count">マーカー ${marked.length}件</span>`:''}</span>${marked.length?`<button class="rp-link" data-rp="marks-manage" data-id="${ESC(a.id)}">マーカーを管理</button>`:''}</div>
  <div class="rp-notebox ${noteText?'has-note':''}" id="rp-note-${ESC(a.id)}" ${noteOpen?'':'hidden'}><label for="rp-note-input-${ESC(a.id)}">✎ ${ESC(a.title)}の学習メモ（自動保存）</label><textarea id="rp-note-input-${ESC(a.id)}" class="rp-textarea" data-rp="note-input" data-id="${ESC(a.id)}" maxlength="4000" placeholder="判例・関連問題・覚え方を記録">${ESC(noteText)}</textarea><small>このメモは学習バックアップに含まれます。</small></div></article>`;
@@ -564,7 +566,7 @@ function readerHTML(){
  const counts=available?shownArticles(doc):[],pages=Math.max(1,Math.ceil(counts.length/s.pageSize)),pg=Math.min(Math.max(1,s.page),pages);s.page=pg;
  const shown=counts.slice((pg-1)*s.pageSize,pg*s.pageSize);
  const markCount=meta.marks.filter(x=>x.lawId===s.lawId).length;
- return `<section class="rp-reader" aria-label="六法条文閲覧"><div class="rp-reader-head"><div><div class="rp-eyebrow">${ESC(info.group==='行政法令'?'試験関連法令':info.group)}</div><h2 id="rp-law-title" tabindex="-1">${ESC(doc?.name||info.name)}</h2>${doc?.number?`<p class="rp-muted">${ESC(doc.number)}</p>`:''}</div><div class="rp-source-actions"><a class="rp-button rp-ghost" href="${official}" target="_blank" rel="noopener noreferrer">公式原文 ↗</a><button class="rp-button rp-secondary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>${s.loading?'取得中…':available?'公式本文を再取得':'↓ 条文を取得'}</button></div></div>
+ return `<section class="rp-reader" aria-label="六法条文閲覧"><div class="rp-reader-head"><div><div class="rp-eyebrow">${ESC(info.group==='行政法令'?'試験関連法令':info.group)}</div><h2 id="rp-law-title" tabindex="-1">${ESC(doc?.name||info.name)}</h2>${doc?.number?`<p class="rp-muted">${ESC(doc.number)}</p>`:''}</div><div class="rp-source-actions">${GUIDE?.lawKey(s.lawId)?`<a class="rp-button rp-ghost" href="#glossary?law=${s.lawId}">この法令の用語</a>`:''}<a class="rp-button rp-ghost" href="${official}" target="_blank" rel="noopener noreferrer">公式原文 ↗</a><button class="rp-button rp-secondary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>${s.loading?'取得中…':available?'公式本文を再取得':'↓ 条文を取得'}</button></div></div>
  <div class="rp-statusrow"><span class="rp-status-pill ${available?'ready':''}">${doc?(doc.bundled?'収録本文':doc.imported?'取込本文':'取得本文'):s.readingPack?'収録本文を準備中':'本文未取得'}</span>${available?`<span>${NF(doc.count)}件の表示項目</span><span>${doc.bundled?'収録':doc.imported?'取込':'取得'} ${timeText(doc.fetchedAt)}（日本時間）</span>`:''}<span>${markCount}マーカー</span></div>
  ${s.error||s.packError?`<div class="rp-alert error" role="alert">${ESC(s.error||s.packError)}<div class="rp-actions"><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button><a href="${official}" target="_blank" rel="noopener noreferrer">e-Gov原文を開く ↗</a></div></div>`:''}
   ${!available?`<div class="rp-blank"><h3>${s.readingPack?'収録本文を読み込み中':ESC(info.name)+'の本文を開く'}</h3>
@@ -617,7 +619,7 @@ function selectionMenu(){
 }
 function renderHTML(){
  return `<div class="rp-page"><div class="rp-page-banner"><div><h1>六法書架と朱引き</h1><p>主要六法と試験関連の15法令を収録。条文を読み、気になる箇所に色やメモを残せます。</p></div><div class="rp-banner-symbol" aria-hidden="true">六</div></div>
- <div class="rp-banner-bottom"><span>主要六法・試験関連法令 15本</span><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></div>
+ <div class="rp-banner-bottom"><span>主要六法・試験関連法令 15本</span><span class="sg-roppo-links"><a href="#glossary">用語索引 →</a><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></span></div>
  ${savedHTML()}
  <button class="rp-mobile-catalog-button" data-rp="toggle-catalog" aria-controls="rp-catalog" aria-expanded="${s.mobileCatalog}">${s.mobileCatalog?'法令一覧を閉じる':'法令を切り替える'} <span>${ESC(selectedInfo().name)}</span></button>
  <div class="rp-workspace">${catalogHTML()}${readerHTML()}</div>

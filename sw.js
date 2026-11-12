@@ -1,5 +1,5 @@
 /* Offline files for this release, scoped to its GitHub Pages directory. */
-const release='20261112-r3';
+const release='20261112-r4a';
 const scope=new URL(self.registration.scope);
 const prefix='shubiki-bunko:'+scope.pathname+':';
 const cacheName=prefix+release;
@@ -11,8 +11,8 @@ const ids=[
  '322AC0000000067','326AC1000000004','417AC0000000086','415AC0000000057','411AC0000000042','index'
 ];
 const files=new Set([
- ...['style.css','roppo.css','atelier.css','reading.css','questions.js','advanced_questions.js',
-     'app.js','roppo.js','law-edition.js','law-voice.js','reader-bgm.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
+ ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','questions.js','advanced_questions.js',
+     'app.js','roppo.js','study-cards.js','glossary-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
      .map(path=>new URL(path+'?v='+release,scope).href),
  music,
  ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png'].map(path=>new URL(path,scope).href)
