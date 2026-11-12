@@ -1,5 +1,5 @@
 /* Offline files for this release, scoped to its GitHub Pages directory. */
-const release='20261112-r4a';
+const release='20261112-r5a';
 const scope=new URL(self.registration.scope);
 const prefix='shubiki-bunko:'+scope.pathname+':';
 const cacheName=prefix+release;

@@ -48,34 +48,42 @@
 .sg-subject h3 span{font:600 .75rem/1.5 var(--font);color:var(--ink)}
 .sg-cards{display:grid;gap:7px}
 .sg-card{border:1px solid var(--line);background:var(--surface);box-shadow:var(--shadow)}
-.sg-card[open]{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
-.sg-card summary{
- display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 12px;
- padding:11px 14px;cursor:pointer;list-style:none;
+.sg-card:has(.sg-card-details[open]){border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.sg-card-prompt{display:grid;gap:3px;min-width:0;padding:11px 14px 4px;line-height:1.65;font-size:.88rem}
+.sg-card-prompt h4{font:750 1rem/1.55 var(--serif)}
+.sg-card-details summary{
+ display:flex;align-items:center;justify-content:space-between;gap:8px;
+ min-height:38px;padding:5px 14px;cursor:pointer;list-style:none;
 }
-.sg-card summary::-webkit-details-marker{display:none}
-.sg-card summary:hover{background:var(--surface2)}
-.sg-card-prompt{display:grid;gap:2px;min-width:0;line-height:1.65;font-size:.88rem}
-.sg-card-prompt strong{font:750 1rem/1.55 var(--serif)}
-.sg-card-side{display:flex;align-items:center;flex-wrap:wrap;gap:5px 9px}
+.sg-card-details summary::-webkit-details-marker{display:none}
+.sg-card-details summary:hover{background:var(--surface2)}
 .sg-status{padding:2px 6px;background:var(--surface2);border:1px solid var(--line);font-size:.7rem;font-weight:700}
 .sg-status.sg-known{color:var(--ink)}
 .sg-status.sg-review{color:var(--accent)}
 .sg-disclosure{color:var(--accent);font-size:.78rem;font-weight:700;white-space:nowrap}
 .sg-disclosure::after{content:" ＋"}
-.sg-card .sg-conceal,.sg-card[open] .sg-reveal{display:none}
-.sg-card[open] .sg-disclosure::after{content:" −"}
-.sg-card[open] .sg-conceal{display:inline}
+.sg-card .sg-conceal,.sg-card-details[open] .sg-reveal{display:none}
+.sg-card-details[open] .sg-disclosure::after{content:" −"}
+.sg-card-details[open] .sg-conceal{display:inline}
 .sg-card-body{display:grid;gap:12px;padding:12px 14px 15px;border-top:1px solid var(--line);font-size:.9rem}
-.sg-card-body h4{margin-bottom:3px;font-size:.8rem;line-height:1.55}
+.sg-card-body h5{margin:0 0 3px;font-size:.8rem;line-height:1.55}
 .sg-answer{padding:9px 12px;border-left:3px solid var(--accent);background:var(--surface2)}
-.sg-answer h4{color:var(--accent)}
+.sg-answer h5{color:var(--accent)}
 .sg-card-actions{
  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:7px 14px;
  padding-top:9px;border-top:1px solid var(--line);
 }
 .sg-card-actions .button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent2);color:var(--accent)}
 .sg-card-refs .sg-ref,.sg-term-description .sg-ref{font-size:.83rem}
+.sg-inline-term{
+ cursor:pointer;color:inherit;text-decoration-line:underline;
+ text-decoration-color:var(--accent);text-decoration-style:solid;text-decoration-thickness:.07em;
+ text-underline-offset:.19em;text-decoration-skip-ink:auto;
+ -webkit-user-select:text;user-select:text;touch-action:manipulation;
+}
+.sg-inline-term:hover{background:var(--accent2)}
+.sg-inline-term:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sg-inline-term:active{background:var(--accent2)}
 .sg-term-chip{
  border:1px solid var(--line);background:var(--surface);color:var(--accent);
  padding:4px 9px;min-height:36px;font:700 .83rem/1.45 var(--font);cursor:pointer;
@@ -88,6 +96,10 @@
  padding:8px 10px;margin:4px 0 11px;border-left:2px solid var(--accent);background:var(--surface2);
 }
 .sg-article-terms>strong{font-size:.77rem;color:var(--ink);flex:none}
+.sg-article-index{display:block}
+.sg-article-index summary{cursor:pointer;font-size:.77rem;font-weight:750}
+.sg-article-index summary span{margin-left:4px;font-size:.72rem;font-weight:600}
+.sg-article-index[open] .sg-links{margin-top:7px}
 .sg-roppo-links{display:flex;flex-wrap:wrap;gap:5px 16px;margin-left:auto}
 .sg-roppo-links a{margin-left:0}
 .sg-index-filters{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr) minmax(0,1fr);margin-bottom:9px}
@@ -133,8 +145,8 @@
 @media(max-width:530px){
  .sg-index-filters{grid-template-columns:repeat(2,minmax(0,1fr))}
  .sg-index-filters>label:first-child{grid-column:1 / -1}
- .sg-card summary{grid-template-columns:minmax(0,1fr);padding:9px 10px}
- .sg-card-side{justify-content:space-between}
+ .sg-card-prompt{padding:9px 10px 4px}
+ .sg-card-details summary{padding-inline:10px}
  .sg-card-body{padding:9px 10px 11px}
  .sg-index-item{padding:7px 8px}
 }

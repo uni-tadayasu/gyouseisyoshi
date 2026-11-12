@@ -25,6 +25,27 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const searchKey=value=>String(value??'').normalize('NFKC').toLowerCase()
  .replace(/[ァ-ヶ]/g,char=>String.fromCharCode(char.charCodeAt(0)-96)).trim();
 const states={known:'覚えた',review:'要復習'};
+// Search aliases can include incomplete phrases. In running text, mark words and complete terms.
+const searchOnlyAliases=new Set([
+ '理由を示','本人のためにすることを示','第三者に対抗','相殺に適した',
+ '契約の内容に適合しない','代襲して','裁判所において当事者が自白した事実',
+ '証拠とすることができない','第三者に提供','原状に復させる'
+]);
+const inlineKey=value=>value.replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xfee0))
+ .replace(/[A-Z]/g,c=>c.toLowerCase());
+const inlineForms=new Map();
+for(const term of glossary.terms){
+ const name=inlineKey(term.name);
+ const forms=new Set([name,...term.aliases.filter(alias=>!searchOnlyAliases.has(alias)).map(inlineKey)]);
+ for(const form of forms){
+  if(form.length<2)continue;
+  if(!inlineForms.has(form))inlineForms.set(form,[]);
+  const choices=inlineForms.get(form);
+  if(form===name)choices.unshift(term);else choices.push(term);
+ }
+}
+const quotePattern=value=>value.replace(/[.*+?${}()|[\]\\]/g,'\\$&');
+const termPattern=new RegExp([...inlineForms.keys()].sort((a,b)=>b.length-a.length).map(quotePattern).join('|'),'gu');
 const cardById=new Map(study.cards.map(card=>[card.id,card]));
 const termById=new Map(glossary.terms.map(term=>[term.id,term]));
 const sortedTerms=[...glossary.terms].sort((a,b)=>a.reading.localeCompare(b.reading,'ja'));
@@ -61,15 +82,46 @@ function sectionLinks(refs){
 function termChips(terms){
  return terms.map(term=>`<button type="button" class="sg-term-chip" data-guide-term="${esc(term.id)}">${esc(term.name)}</button>`).join('');
 }
-function fragmentText(text,ruby){
- if(!Array.isArray(ruby)||!ruby.length)return text||'';
- let result='',start=0;
+function rubyProjection(text,ruby){
+ if(!Array.isArray(ruby)||!ruby.length)return {text,toSource:at=>at};
+ let result='',sourceAt=0;
+ const offsets=[];
  for(const hint of ruby){
-  result+=text.slice(start,hint.start)+hint.base;
-  start=hint.end;
+  if(!hint.base||hint.start<sourceAt||hint.end>text.length||hint.end<=hint.start)continue;
+  result+=text.slice(sourceAt,hint.start)+hint.base;
+  sourceAt=hint.end;
+  offsets.push({after:result.length,delta:sourceAt-result.length});
  }
- return result+text.slice(start);
+ return {
+  text:result+text.slice(sourceAt),
+  toSource(at){
+   let delta=0;
+   for(const point of offsets){if(point.after>at)break;delta=point.delta;}
+   return at+delta;
+  }
+ };
 }
+function inlineText(value,{lawId='',ruby,renderSlice}={}){
+ const text=String(value??'');
+ const render=renderSlice||((start,end)=>esc(text.slice(start,end)));
+ const projected=rubyProjection(text,ruby);
+ const input=inlineKey(projected.text);
+ let html='',cursor=0;
+ for(const match of input.matchAll(termPattern)){
+  const form=match[0];
+  const start=projected.toSource(match.index),end=projected.toSource(match.index+form.length);
+  if(start<cursor||end<=start)continue;
+  const choices=inlineForms.get(form);
+  // Canonical spellings come first within each law, followed by their aliases.
+  const term=(lawId&&choices.find(entry=>entry.refs.some(([key])=>laws[key][0]===lawId)))||choices[0];
+  if(start>cursor)html+=render(cursor,start);
+  html+=`<span class="sg-inline-term" role="button" tabindex="0" aria-haspopup="dialog" data-guide-term="${esc(term.id)}">${render(start,end)}</span>`;
+  cursor=end;
+ }
+ if(cursor<text.length)html+=render(cursor,text.length);
+ return html;
+}
+function fragmentText(text,ruby){return rubyProjection(text||'',ruby).text;}
 function forArticle(lawId,article){
  const available=termsByLaw.get(lawId);
  if(!available?.length)return '';
@@ -83,7 +135,11 @@ function forArticle(lawId,article){
   else if(item.forms.some(form=>text.includes(form)))related.push(item.term);
  }
  const terms=[...matches,...related];
- return terms.length?`<div class="sg-article-terms"><strong>用語解説</strong><div class="sg-links">${termChips(terms)}</div></div>`:'';
+ if(!terms.length)return '';
+ const links=`<div class="sg-links">${termChips(terms)}</div>`;
+ return terms.length>8
+  ?`<details class="sg-article-terms sg-article-index"><summary>用語解説 <span>${terms.length}件</span></summary>${links}</details>`
+  :`<div class="sg-article-terms"><strong>用語解説</strong>${links}</div>`;
 }
 
 function options(items,selected){
@@ -96,16 +152,23 @@ function cardHTML(card,progress,openCards){
  const status=progress[card.id];
  const termList=termChips(card.terms.map(id=>termById.get(id)));
  const refs=sectionLinks(card.refs);
- return `<details class="sg-card" data-guide-card="${card.id}" ${openCards.has(card.id)?'open':''}>
-  <summary id="sg-card-${card.id}">
-   <span class="sg-card-prompt"><strong>${esc(card.title)}</strong><span>${esc(card.prompt)}</span></span>
-   <span class="sg-card-side">${status?`<span class="sg-status sg-${status}">${states[status]}</span>`:''}<span class="sg-disclosure" aria-hidden="true"><span class="sg-reveal">答えを見る</span><span class="sg-conceal">答えを閉じる</span></span></span>
-  </summary>
-  <div class="sg-card-body">
-   <div class="sg-answer"><h4>答え</h4><p>${esc(card.answer)}</p></div>
-   <div class="sg-point"><h4>確認ポイント</h4><p>${esc(card.check)}</p></div>
-   <div class="sg-card-terms"><h4>用語解説</h4><div class="sg-links">${termList}</div></div>
-   ${refs?`<div class="sg-card-refs"><h4>参照条文</h4><div class="sg-links">${refs}</div></div>`:''}
+ const lawId=laws[card.refs[0]?.[0]]?.[0]||'';
+ const text=value=>inlineText(value,{lawId});
+ return `<div class="sg-card">
+  <div class="sg-card-prompt">
+   <h4 id="sg-card-title-${card.id}">${text(card.title)}</h4>
+   <p>${text(card.prompt)}</p>
+  </div>
+  <details class="sg-card-details" data-guide-card="${card.id}" ${openCards.has(card.id)?'open':''}>
+   <summary id="sg-card-${card.id}" aria-describedby="sg-card-title-${card.id}">
+    <span class="sg-disclosure"><span class="sg-reveal">答えを見る</span><span class="sg-conceal">答えを閉じる</span></span>
+    ${status?`<span class="sg-status sg-${status}">${states[status]}</span>`:''}
+   </summary>
+   <div class="sg-card-body">
+    <div class="sg-answer"><h5>答え</h5><p>${text(card.answer)}</p></div>
+    <div class="sg-point"><h5>確認ポイント</h5><p>${text(card.check)}</p></div>
+   <div class="sg-card-terms"><h5>用語解説</h5><div class="sg-links">${termList}</div></div>
+   ${refs?`<div class="sg-card-refs"><h5>参照条文</h5><div class="sg-links">${refs}</div></div>`:''}
    <div class="sg-card-actions">
     <div class="sg-actions" role="group" aria-label="暗記の記録">
      <button type="button" id="sg-known-${card.id}" class="button secondary small" data-action="guideMark" data-id="${card.id}" data-value="known" aria-pressed="${status==='known'}">覚えた</button>
@@ -114,7 +177,8 @@ function cardHTML(card,progress,openCards){
     <button type="button" class="text-link sg-practice" data-action="guidePractice" data-id="${card.id}">問題索引で練習 <span aria-hidden="true">→</span></button>
    </div>
   </div>
- </details>`;
+  </details>
+ </div>`;
 }
 function essentialsHTML(progress,view){
  const known=study.cards.filter(card=>progress[card.id]==='known').length;
@@ -131,7 +195,7 @@ function essentialsHTML(progress,view){
  }).join('');
  return `<div class="sg-page">
   <header class="sg-header">
-   <div><h1>これだけは覚える</h1><p>条文の原則・例外・期限を、まず自分の言葉で答えてから確認しましょう。</p></div>
+   <div><h1>これだけは覚える</h1><p>条文の原則・例外・期限を、まず自分の言葉で答えてから確認しましょう。下線のある用語は押すと意味が開きます。</p></div>
    <a class="sg-ref" href="#glossary">用語索引 <span aria-hidden="true">→</span></a>
   </header>
   <section class="sg-score" aria-labelledby="sg-score-heading">
@@ -225,12 +289,24 @@ function openTerm(id,button){
 }
 document.addEventListener('click',event=>{
  const button=event.target.closest('[data-guide-term]');
- if(button)openTerm(button.dataset.guideTerm,button);
+ if(!button)return;
+ if(button.classList.contains('sg-inline-term')){
+  const selection=window.getSelection?.();
+  if(event.detail&&selection?.rangeCount&&!selection.isCollapsed&&selection.getRangeAt(0).intersectsNode(button))return;
+ }
+ openTerm(button.dataset.guideTerm,button);
+});
+document.addEventListener('keydown',event=>{
+ if(event.defaultPrevented||event.isComposing||event.repeat||(event.key!=='Enter'&&event.key!==' '))return;
+ const button=event.target.closest('.sg-inline-term');
+ if(!button)return;
+ event.preventDefault();
+ openTerm(button.dataset.guideTerm,button);
 });
 window.addEventListener('hashchange',()=>{if(dialog?.open)dialog.close();});
 
 window.GYOSHI_GUIDE={
- cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,forArticle,
+ cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,forArticle,inlineText,
  getCard:id=>cardById.get(id),lawKey:id=>Object.keys(laws).find(key=>laws[key][0]===id)
 };
 })();

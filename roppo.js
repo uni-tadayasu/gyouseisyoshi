@@ -442,27 +442,41 @@ function shownArticles(doc){
   return (!marks||marks.has(a.id))&&(!books||books.has(bid(s.lawId,a.id)));
  });
 }
-function markedContent(a,i,txt){
+function articleText(text,ruby,renderSlice){
+ return GUIDE?.inlineText(text,{lawId:s.lawId,ruby,renderSlice})??
+  (renderSlice?renderSlice(0,text.length):ESC(text));
+}
+function markedContent(a,i,block){
+ const {t:txt,ruby}=block;
  const marks=meta.marks.filter(m=>{
   if(m.lawId!==s.lawId||m.articleId!==a.id||m.block!==i||m.stale||m.end>txt.length)return false;
   const exact=txt.slice(m.start,m.end);
   return m.checksum?fingerprint(exact)===m.checksum:!m.excerpt||exact.startsWith(m.excerpt);
  });
- if(!marks.length)return ESC(txt);
- const boundaries=[0,txt.length,...marks.flatMap(m=>[Math.max(0,Math.min(txt.length,m.start)),Math.max(0,Math.min(txt.length,m.end))])].sort((x,y)=>x-y);
- let html='';for(let k=0;k<boundaries.length-1;k++){
-  const l=boundaries[k],r=boundaries[k+1];if(l===r)continue;
-  const active=marks.filter(m=>m.start<=l&&m.end>=r).sort((a,b)=>(b.at||0)-(a.at||0))[0];
-  const chunk=ESC(txt.slice(l,r));html+=active?`<mark class="rp-mark rp-${active.color}" title="保存済みマーカー">${chunk}</mark>`:chunk;
- }
- return html;
+ if(!marks.length)return articleText(txt,ruby);
+ const boundaries=[...new Set([0,txt.length,...marks.flatMap(m=>[m.start,m.end])])].sort((x,y)=>x-y);
+ marks.sort((a,b)=>(b.at||0)-(a.at||0));
+ const runs=boundaries.slice(1).map((end,index)=>{
+  const start=boundaries[index];
+  return {start,end,mark:marks.find(m=>m.start<=start&&m.end>=end)};
+ });
+ return articleText(txt,ruby,(start,end)=>{
+  let html='';
+  for(const run of runs){
+   const left=Math.max(start,run.start),right=Math.min(end,run.end);
+   if(left>=right)continue;
+   const chunk=ESC(txt.slice(left,right));
+   html+=run.mark?`<mark class="rp-mark rp-${run.mark.color}" title="保存済みマーカー">${chunk}</mark>`:chunk;
+  }
+  return html;
+ });
 }
 function articleHTML(a){
  const marked=meta.marks.filter(m=>m.lawId===s.lawId&&m.articleId===a.id),book=meta.bookmarks.includes(bid(s.lawId,a.id));
  const key=bid(s.lawId,a.id),noteText=meta.notes[key]||'',noteOpen=s.noteIds.has(key);
- return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}" tabindex="-1"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${ESC(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${ESC(a.caption)}</div>`:''}<h3>${ESC(a.title)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="条文のしおり" aria-pressed="${book}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモ" aria-expanded="${noteOpen}">✎</button><button class="rp-mini" data-rp="copy-link" data-id="${ESC(a.id)}" aria-label="${ESC(a.title)}へのリンクをコピー" title="条文リンク">↗</button></div></div>
+ return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}" tabindex="-1"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${articleText(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${articleText(a.caption,a.captionRuby)}</div>`:''}<h3>${articleText(a.title,a.titleRuby)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="条文のしおり" aria-pressed="${book}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモ" aria-expanded="${noteOpen}">✎</button><button class="rp-mini" data-rp="copy-link" data-id="${ESC(a.id)}" aria-label="${ESC(a.title)}へのリンクをコピー" title="条文リンク">↗</button></div></div>
  ${GUIDE?.forArticle(s.lawId,a)||''}
- <div class="rp-article-body">${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b.t)}</p>`).join('')}</div>
+ <div class="rp-article-body">${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b)}</p>`).join('')}</div>
  <div class="rp-article-foot" ${marked.length?'':'hidden'}><span>${marked.length?`<span class="rp-foot-count">マーカー ${marked.length}件</span>`:''}</span>${marked.length?`<button class="rp-link" data-rp="marks-manage" data-id="${ESC(a.id)}">マーカーを管理</button>`:''}</div>
  <div class="rp-notebox ${noteText?'has-note':''}" id="rp-note-${ESC(a.id)}" ${noteOpen?'':'hidden'}><label for="rp-note-input-${ESC(a.id)}">✎ ${ESC(a.title)}の学習メモ（自動保存）</label><textarea id="rp-note-input-${ESC(a.id)}" class="rp-textarea" data-rp="note-input" data-id="${ESC(a.id)}" maxlength="4000" placeholder="判例・関連問題・覚え方を記録">${ESC(noteText)}</textarea><small>このメモは学習バックアップに含まれます。</small></div></article>`;
 }
@@ -618,7 +632,7 @@ function selectionMenu(){
  <button class="rp-button rp-ghost" data-rp="speak-selection">▷ 選んだ文章を読む</button></div>`;
 }
 function renderHTML(){
- return `<div class="rp-page"><div class="rp-page-banner"><div><h1>六法書架と朱引き</h1><p>主要六法と試験関連の15法令を収録。条文を読み、気になる箇所に色やメモを残せます。</p></div><div class="rp-banner-symbol" aria-hidden="true">六</div></div>
+ return `<div class="rp-page"><div class="rp-page-banner"><div><h1>六法書架と朱引き</h1><p>主要六法と試験関連の15法令を収録。下線のある用語は押すと意味が開きます。条文にはマーカーやメモも残せます。</p></div><div class="rp-banner-symbol" aria-hidden="true">六</div></div>
  <div class="rp-banner-bottom"><span>主要六法・試験関連法令 15本</span><span class="sg-roppo-links"><a href="#glossary">用語索引 →</a><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></span></div>
  ${savedHTML()}
  <button class="rp-mobile-catalog-button" data-rp="toggle-catalog" aria-controls="rp-catalog" aria-expanded="${s.mobileCatalog}">${s.mobileCatalog?'法令一覧を閉じる':'法令を切り替える'} <span>${ESC(selectedInfo().name)}</span></button>
