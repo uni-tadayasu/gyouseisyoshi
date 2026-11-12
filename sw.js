@@ -1,6 +1,6 @@
 /* オフライン動作。キャッシュはこの版のアプリに限定します。 */
-const CACHE='gyosei-master-roppo-20261112-r1';
-const APP=['./','./index.html','./style.css','./roppo.css','./roppo.js','./app.js','./questions.js','./advanced_questions.js','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
+const CACHE='gyosei-master-shubiki-20261112-design-r1';
+const APP=['./','./index.html','./style.css','./roppo.css','./atelier.css','./roppo.js','./app.js','./questions.js','./advanced_questions.js','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(APP)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('gyosei-master-')&&k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
 self.addEventListener('fetch',event=>{
