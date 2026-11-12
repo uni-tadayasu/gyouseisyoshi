@@ -44,7 +44,8 @@ async function extractFullContextBrowser(text, options = {}) {
 async function synthesizeBrowser(text, options = {}) {
   const mod = await ensureConfigured();
   const result = mod.synthesize(text, JSON.stringify(options));
-  return { pcm: new Float32Array(result.pcm), sampleRate: result.sampleRate };
+  const pcm = result.pcm instanceof Float32Array ? result.pcm : new Float32Array(result.pcm);
+  return { pcm, sampleRate: result.sampleRate };
 }
 async function runFrontendBrowser(text) {
   const mod = await ensureConfigured();
@@ -69,7 +70,7 @@ self.onmessage = async (event) => {
       result = await synthesizeBrowser(request.args[0], request.args[1]);
     }
     const response = { id: request.id, ok: true, result };
-    self.postMessage(response);
+    self.postMessage(response, result?.pcm ? [result.pcm.buffer] : []);
   } catch (error) {
     const response = {
       id: request.id,

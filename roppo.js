@@ -558,6 +558,7 @@ function globalAudioHTML(){
    <label class="rp-duck-setting"><input type="checkbox" id="ga-read-meanings" ${meta.readTermMeanings?'checked':''}>本文と一緒に熟語の意味も読む</label>
    <div class="ga-levels"><label for="ga-rate">読み上げ速度${ratesHTML('ga-rate')}</label>
    <label for="ga-voice">日本語音声<select id="ga-voice" class="rp-input">${voicesHTML()}</select></label></div>
+   <button type="button" class="button secondary small ga-voice-sample" data-audio="test-voice">発音と抑揚を試聴</button>
   </div>
  </details>`;
 }
@@ -684,7 +685,7 @@ function selectionMenu(){
 }
 function renderHTML(){
  return `<div class="rp-page"><div class="rp-page-banner"><div><h1>六法書架と朱引き</h1><p>主要六法と試験関連の15法令を収録。下線のある用語は押すと意味が開きます。条文にはマーカーやメモも残せます。</p></div><div class="rp-banner-symbol" aria-hidden="true">六</div></div>
- <div class="rp-banner-bottom"><span>主要六法・試験関連法令 15本</span><span class="sg-roppo-links"><a href="#glossary">用語索引 →</a><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></span></div>
+ <div class="rp-banner-bottom">${GUIDE?.underlineLegend()||''}<span class="sg-roppo-links"><a href="#glossary">用語辞典 →</a><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></span></div>
  ${savedHTML()}
  <button class="rp-mobile-catalog-button" data-rp="toggle-catalog" aria-controls="rp-catalog" aria-expanded="${s.mobileCatalog}">${s.mobileCatalog?'法令一覧を閉じる':'法令を切り替える'} <span>${ESC(selectedInfo().name)}</span></button>
  <div class="rp-workspace">${catalogHTML()}${readerHTML()}</div>
@@ -753,10 +754,12 @@ function getArticle(id){return mem.get(s.lawId)?.articles.find(x=>x.id===id);}
 function nativeSpeech(){return typeof window.speechSynthesis!=='undefined'&&typeof window.SpeechSynthesisUtterance!=='undefined';}
 let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0,utterance=null,voiceStatus='停止中',activeSpeechArticle='',voiceKind='';
 let voiceEngine='',localPlayer=null,localPending=false,outputContext=null;
+function japaneseVoices(){
+ return (window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
+}
 function voicesHTML(){
- const voices=(window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
  const builtIn=LOCAL_VOICE?.available?`<option value="builtin-ja" ${meta.voice==='builtin-ja'?'selected':''}>内蔵日本語音声</option>`:'';
- return '<option value="">自動（同時再生を優先）</option>'+builtIn+voices.map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
+ return '<option value="">自動（端末音声・BGM対応）</option>'+builtIn+japaneseVoices().map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
 }
 function indicateSpeech(id){
  if(activeSpeechArticle)EL('rp-a-'+activeSpeechArticle)?.classList.remove('rp-reading-now');
@@ -788,13 +791,41 @@ function stopMeaning(){if(voiceKind==='meaning')stopVoice();}
 function stopReaderAudio(){
  stopVoice();bgm.pause();EL('rp-mark-manager')?.remove();
 }
-function splitSpeech(str){const parts=String(str).replace(/\s+/g,' ').match(/[^。！？!？\n]+[。！？!？]?/g)||[str],chunks=[];
- for(const part of parts){let cur=part;while(cur.length>150){let cut=cur.lastIndexOf('、',150);if(cut<65)cut=150;else cut++;chunks.push(cur.slice(0,cut));cur=cur.slice(cut);}if(cur.trim())chunks.push(cur.trim());}
+const speechWords=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'word'}):null;
+function splitSpeech(value){
+ const text=String(value).replace(/[^\S\n]+/gu,' ').trim();
+ const sentences=text.match(/[^。！？!?\n]+(?:[。！？!?]+[」』）】]*)?/gu)||[];
+ const chunks=[];
+ for(const sentence of sentences){
+  let remaining=sentence.trim();
+  while(remaining.length>110){
+   const punctuation=Math.max(...['、','，','；','：'].map(mark=>remaining.lastIndexOf(mark,108)));
+   let cut=punctuation>=48?punctuation+1:0;
+   if(!cut&&speechWords){
+    for(const token of speechWords.segment(remaining)){
+     if(token.index>110)break;
+     if(token.index>=50&&!/^\s+$/u.test(token.segment))cut=token.index;
+    }
+   }
+   if(!cut){
+    const safe=remaining.slice(0,110).search(/[ぁ-ん][一-龯]/u);
+    cut=safe>=0?safe+1:110;
+    if(/[\uD800-\uDBFF]/u.test(remaining[cut-1]))cut--;
+   }
+   chunks.push(remaining.slice(0,cut).trim());
+   remaining=remaining.slice(cut).trim();
+  }
+  if(remaining)chunks.push(remaining);
+ }
  return chunks.slice(0,1500);
 }
 function getVoice(){
- const voices=(window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
- return voices.find(voice=>voice.voiceURI===meta.voice)||voices.find(voice=>voice.localService)||voices[0]||null;
+ const voices=japaneseVoices();
+ const enhanced=voice=>/(?:natural|enhanced|premium|高品質|拡張|自然)/iu.test(voice.name||'');
+ return voices.find(voice=>voice.voiceURI===meta.voice)
+  ||voices.find(voice=>voice.localService&&enhanced(voice))
+  ||voices.find(voice=>voice.localService&&voice.default)
+  ||voices.find(voice=>voice.localService)||voices.find(voice=>voice.default)||voices[0]||null;
 }
 function scheduleNext(token){setTimeout(()=>speakNext(token),0);}
 function recoverNative(token){
@@ -850,7 +881,7 @@ function meaningParts(term){
 function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}){
  stopVoice();
  outputContext=LOCAL_VOICE?.available?bgm.voiceOutput():null;
- if(!nativeSpeech()&&!outputContext){
+ if((!nativeSpeech()||!getVoice())&&!outputContext){
   voiceState('このブラウザでは読み上げを利用できません');
   note('ブラウザと端末の日本語音声をご確認ください。','bad');return;
  }
@@ -862,15 +893,15 @@ function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}
   const utterances=[];
   for(const part of item.parts){
    if(!part.t)continue;
-   utterances.push(pronounce(part));
+   utterances.push(pronounce(part,{lawId:item.lawId,kind}));
    if(!withMeanings)continue;
    for(const term of GUIDE?.termsIn(part,item.lawId)||[]){
     if(explained.has(term.id))continue;
     explained.add(term.id);
-    utterances.push(...meaningParts(term).slice(0,2).map(pronounce));
+    utterances.push(...meaningParts(term).slice(0,2).map(part=>pronounce(part,{kind:'meaning'})));
    }
   }
-  return splitSpeech(utterances.join('。').replace(/。{2,}/g,'。')).map(text=>({id:item.id||'',text}));
+  return splitSpeech(utterances.join('\n')).map(text=>({id:item.id||'',text}));
  });
  if(!segments.length){voiceEngine='';voiceState('読み上げる文章がありません');return;}
  voiceKind=kind;speaking=true;paused=false;bgm.beforeSpeech();speakNext(speakTokens);
@@ -904,6 +935,7 @@ function handleAudioClick(event){
  if(!control)return;
  switch(control.dataset.audio){
   case 'read-screen':speakScreen();break;
+  case 'test-voice':startSpeech([{parts:[{t:'条文を声に出して読むと、理解が深まります。相殺、先取特権、そして競売。ここでいう競売とは、入札などで売却する手続です。'}]}],{kind:'sample',withMeanings:false});break;
   case 'read-card':speakCard(control);break;
   case 'replay-meaning':speakMeaning(GUIDE?.getTerm(control.closest('[data-term-id]')?.dataset.termId));break;
   case 'stop-meaning':stopMeaning();break;

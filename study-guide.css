@@ -75,10 +75,20 @@
 }
 .sg-card-actions .button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent2);color:var(--accent)}
 .sg-card-refs .sg-ref,.sg-term-description .sg-ref{font-size:.83rem}
+.sg-term-line{
+ text-decoration-line:underline;text-decoration-style:solid;
+ text-decoration-color:var(--sg-general-line,currentColor);text-decoration-thickness:.075em;
+ text-underline-offset:.2em;text-decoration-skip-ink:auto;
+}
+.sg-term-legal{
+ text-decoration-style:double;text-decoration-color:var(--sg-legal-line,var(--accent));
+}
+.sg-term-legend{
+ display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 15px;
+ margin-top:8px;font-size:.78rem;line-height:1.7;font-weight:700;
+}
 .sg-inline-term{
- cursor:pointer;color:inherit;text-decoration-line:underline;
- text-decoration-color:var(--accent);text-decoration-style:solid;text-decoration-thickness:.07em;
- text-underline-offset:.19em;text-decoration-skip-ink:auto;
+ cursor:pointer;color:inherit;
  -webkit-user-select:text;user-select:text;touch-action:manipulation;
 }
 .sg-inline-term:hover{background:var(--accent2)}

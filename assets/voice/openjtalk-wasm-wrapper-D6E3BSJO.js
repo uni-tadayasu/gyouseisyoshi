@@ -2721,7 +2721,7 @@ async function createOpenJTalkModule2(moduleArg = {}) {
         ensureOk(rc, "synthesize");
         const sampleRate = core.HEAP32[ratePtr >> 2];
         const samples = core.HEAPF32.slice(pcmPtr >> 2, (pcmPtr >> 2) + rc);
-        return { pcm: Array.from(samples), sampleRate };
+        return { pcm: samples, sampleRate };
       } finally {
         core._free(pcmPtr);
         core._free(ratePtr);

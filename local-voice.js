@@ -13,7 +13,7 @@
  }
  async function synthesize(text,rate){
   const api=await load();
-  const wave=await api.synthesizeAsync(text,{speed:rate,sampleRate:24000,fperiod:120});
+  const wave=await api.synthesizeAsync(text,{speed:rate});
   if(!wave.pcm?.length||!wave.sampleRate)throw Error('音声を生成できませんでした');
   return wave;
  }
