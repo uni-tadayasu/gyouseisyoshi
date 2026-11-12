@@ -1,7 +1,7 @@
 {
-  "name": "行政書士 MASTER ULTRA | 300問・高機能試験対策",
+  "name": "行政書士 MASTER ULTRA | 六法・300問・読み上げ・マーカー",
   "short_name": "行政書士ULTRA",
-  "description": "オリジナル300問・忘却曲線に基づく復習・弱点分析・本試験模試・記述式・学習ノート",
+  "description": "行政書士試験問題集300問、六法・重要法令検索、条文読み上げ、4色マーカー、弱点分析、模擬試験。",
   "lang": "ja",
   "start_url": "./index.html#dashboard",
   "scope": "./",
