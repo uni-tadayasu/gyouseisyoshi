@@ -32,6 +32,7 @@ const NF=n=>Number(n||0).toLocaleString('ja-JP');
 const COLORS=['yellow','mint','pink','blue'];
 const EDITION=window.GYOSHI_EDITION;
 const LAW_VOICE=window.GYOSHI_LAW_VOICE;
+const LOCAL_VOICE=window.GYOSHI_LOCAL_VOICE;
 const GUIDE=window.GYOSHI_GUIDE;
 const readerRoute=()=>location.hash.split('?')[0]==='#roppo';
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
@@ -89,7 +90,7 @@ function fingerprint(text){
 }
 function fresh(){
  return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{},
-  voiceVolume:100,bgmVolume:22,bgmDuck:true,readings:[]};
+  voiceVolume:100,bgmVolume:22,bgmDuck:true,readTermMeanings:false,readings:[]};
 }
 function volumePercent(value,fallback){
  return typeof value==='number'&&Number.isFinite(value)?Math.round(Math.max(0,Math.min(100,value))):fallback;
@@ -104,6 +105,7 @@ function cleanMeta(m){
  f.voiceVolume=volumePercent(m.voiceVolume,f.voiceVolume);
  f.bgmVolume=volumePercent(m.bgmVolume,f.bgmVolume);
  f.bgmDuck=m.bgmDuck!==false;
+ f.readTermMeanings=m.readTermMeanings===true;
  f.readings=LAW_VOICE.cleanReadings(m.readings);
  f.lastLaw=typeof m.lastLaw==='string'?m.lastLaw:'321CONSTITUTION';
  f.custom=Array.isArray(m.custom)?m.custom.filter(x=>x&&/^[0-9A-Z]{10,22}$/.test(x.id)&&typeof x.name==='string').slice(0,100).map(x=>({id:x.id,name:x.name.slice(0,80),group:'追加法令',topic:'インポート'})):[];
@@ -484,32 +486,80 @@ function catalogHTML(){
  const needle=fold(s.lawFilter),list=allLaws().filter(x=>(s.group==='all'||x.group===s.group)&&(!needle||fold(x.name+' '+x.topic+' '+x.id).includes(needle)));
  return `<aside class="rp-catalog ${s.mobileCatalog?'rp-catalog-open':''}" aria-label="法令一覧" id="rp-catalog"><div class="rp-catalog-top"><div><strong>法令一覧</strong></div><span class="rp-count">${allLaws().length}法令</span></div><input class="rp-input rp-catalog-search" type="search" id="rp-lawfilter" placeholder="法令名を検索" value="${ESC(s.lawFilter)}" aria-label="法令名を検索"><div class="rp-tabs" role="group" aria-label="法令グループ">${[['all','すべて'],['六法','六法'],['行政法令','行政法令'],['追加法令','追加']].map(([x,t])=>`<button class="${s.group===x?'active':''}" data-rp="group" data-val="${x}">${t}</button>`).join('')}</div><div class="rp-lawlist">${list.length?list.map(x=>`<button class="rp-lawitem ${s.lawId===x.id?'selected':''}" data-rp="select" data-id="${x.id}"><span class="rp-lawitem-body"><strong>${ESC(x.name)}</strong><small>${ESC(x.topic||x.group)}</small></span><span class="rp-cache-status  ${EDITION?.has(x.id)||mem.has(x.id)?'cached':''}" title="法令本文の状態">${EDITION?.has(x.id)?'収録':mem.has(x.id)?'保存済':'要取得'}</span></button>`).join(''):'<div class="rp-mini-empty">該当する法令がありません。</div>'}</div><details id="rp-add-tools" class="rp-catalog-bottom rp-add-tools" ${s.addOpen?'open':''}><summary>法令を追加・更新</summary><button class="rp-button rp-secondary rp-full" data-rp="bulk" ${s.fetchingAll?'disabled':''}>${s.fetchingAll?'取得処理中…':'主要六法の公式本文を再取得'}</button>${s.bulkStatus?`<p class="rp-muted" role="status">${ESC(s.bulkStatus)}</p>`:''}<button class="rp-button rp-ghost rp-full" data-rp="choose-xml">＋ e-Gov法令XMLを取り込む</button><label class="rp-custom-label" for="rp-add-id">ほかの法令を追加（e-Gov法令ID）</label><div class="rp-custom-row"><input id="rp-add-id" class="rp-input" placeholder="例：321CONSTITUTION" maxlength="22" autocapitalize="characters" aria-label="追加する法令ID"><button class="rp-button rp-secondary" data-rp="add-law">追加</button></div><div class="rp-official-panel"><button class="rp-official-toggle" data-rp="toggle-index" aria-expanded="${s.indexOpen}">憲法・法律の公式目録から探す <span>${s.indexOpen?'−':'＋'}</span></button>${officialSearchHTML()}</div><small>追加法令の本文は、公式取得またはXML取込で開けます。</small></details></aside>`;
 }
-const volumeFields={'rp-voice-volume':'voiceVolume','rp-bgm-volume':'bgmVolume'};
+const volumeFields={'rp-voice-volume':'voiceVolume','rp-bgm-volume':'bgmVolume','ga-voice-volume':'voiceVolume','ga-bgm-volume':'bgmVolume'};
 function updateVolume(input){
- const key=volumeFields[input.id];
  if(!Object.hasOwn(volumeFields,input.id))return false;
+ const key=volumeFields[input.id];
  meta[key]=volumePercent(Number(input.value),meta[key]);
- const output=EL(input.id+'-value');
- if(output)output.value=meta[key]+'%';
+ syncAudioInputs();
  if(key==='bgmVolume')syncBgmSettings();
+ else if(localPlayer)localPlayer.volume(meta.voiceVolume/100);
  return true;
 }
+function syncAudioInputs(){
+ for(const [id,key] of Object.entries(volumeFields)){
+  const input=EL(id),output=EL(id+'-value');
+  if(input&&input.value!==String(meta[key]))input.value=meta[key];
+  if(output)output.value=meta[key]+'%';
+ }
+ for(const prefix of ['rp','ga']){
+  const duck=EL(prefix+'-bgm-duck'),meanings=EL(prefix+'-read-meanings'),voice=EL(prefix+'-voice'),rate=EL(prefix+'-rate');
+  if(duck)duck.checked=meta.bgmDuck;
+  if(meanings)meanings.checked=meta.readTermMeanings;
+  if(voice)voice.value=meta.voice;
+  if(rate)rate.value=meta.rate;
+ }
+}
 function bgmLabel(){
- const playing=bgm.state==='playing'||bgm.state==='loading';
- const status={idle:'停止中',loading:'準備中',playing:'再生中',error:'BGMを再生できませんでした。もう一度お試しください。'};
+ const playing=['playing','loading','interrupted'].includes(bgm.state);
+ const status={idle:'停止中',loading:'準備中',playing:'再生中',interrupted:'中断中・復帰待ち',error:'再生できませんでした。もう一度お試しください。'};
  return {button:playing?'BGMを停止':'BGMを再生',status:status[bgm.state]};
 }
 function syncBgmControls(){
- const label=bgmLabel(),button=EL('rp-bgm-toggle'),status=EL('rp-bgm-status');
- if(button)button.textContent=label.button;
- if(status)status.textContent=label.status;
+ const label=bgmLabel();
+ for(const button of document.querySelectorAll('[data-bgm-button]'))button.textContent=label.button;
+ for(const status of document.querySelectorAll('[data-bgm-status]'))status.textContent=label.status;
 }
 function bgmHTML(){
  const label=bgmLabel();
  return `<div class="rp-bgmbar" role="group" aria-label="BGMの操作">
-  <div class="rp-bgm-track"><strong>Hear your voice</strong><span class="rp-muted" id="rp-bgm-status" role="status">${ESC(label.status)}</span></div>
-  <button class="rp-button rp-ghost" id="rp-bgm-toggle" data-rp="toggle-bgm" type="button">${label.button}</button>
+  <div class="rp-bgm-track"><strong>Hear your voice</strong><span class="rp-muted" data-bgm-status role="status">${ESC(label.status)}</span></div>
+  <button class="rp-button rp-ghost" data-bgm-button data-audio="bgm" type="button">${label.button}</button>
  </div>`;
+}
+function meaningAudioHTML(){
+ return `<div class="sg-meaning-audio" aria-label="用語の音声">
+  <div class="sg-actions"><button type="button" class="button secondary small" data-audio="replay-meaning">意味を聞く</button>
+   <button type="button" class="button secondary small" data-audio="stop-meaning" data-voice-stop disabled>停止</button>
+   <button type="button" class="button secondary small" data-audio="bgm" data-bgm-button>${bgmLabel().button}</button>
+  </div>
+  <p class="sg-meaning-status" data-voice-state role="status">${ESC(voiceStatus)}</p>
+ </div>`;
+}
+function ratesHTML(id){
+ return `<select id="${id}" class="rp-input" aria-label="読み上げ速度">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,label])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${label}</option>`).join('')}</select>`;
+}
+function globalAudioHTML(){
+ return `<details class="ga-tools" id="ga-tools">
+  <summary class="icon-btn" aria-label="音声・BGMの操作" title="音声・BGMの操作">音声</summary>
+  <div class="ga-panel">
+   <div class="ga-controls">
+    <button type="button" class="button primary small" data-audio="read-screen">この画面を読む</button>
+    <button type="button" class="button secondary small" data-audio="pause" data-voice-pause ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button>
+    <button type="button" class="button secondary small" data-audio="stop" data-voice-stop ${speaking?'':'disabled'}>停止</button>
+   </div>
+   <p class="ga-status" data-voice-state role="status">${ESC(voiceStatus)}</p>
+   ${bgmHTML()}
+   <div class="ga-levels">
+    ${volumeHTML('ga-voice-volume','voiceVolume','読み上げ音量')}
+    ${volumeHTML('ga-bgm-volume','bgmVolume','BGM音量')}
+   </div>
+   <label class="rp-duck-setting"><input type="checkbox" id="ga-bgm-duck" ${meta.bgmDuck?'checked':''}>読み上げ中はBGMを小さくする</label>
+   <label class="rp-duck-setting"><input type="checkbox" id="ga-read-meanings" ${meta.readTermMeanings?'checked':''}>本文と一緒に熟語の意味も読む</label>
+   <div class="ga-levels"><label for="ga-rate">読み上げ速度${ratesHTML('ga-rate')}</label>
+   <label for="ga-voice">日本語音声<select id="ga-voice" class="rp-input">${voicesHTML()}</select></label></div>
+  </div>
+ </details>`;
 }
 function volumeHTML(id,key,label,description=''){
  const value=meta[key];
@@ -533,6 +583,7 @@ function soundSettingsHTML(){
    ${volumeHTML('rp-bgm-volume','bgmVolume','BGM音量')}
   </div>
   <label class="rp-duck-setting"><input type="checkbox" id="rp-bgm-duck" ${meta.bgmDuck?'checked':''}>読み上げ中はBGMを小さくする</label>
+  <label class="rp-duck-setting"><input type="checkbox" id="rp-read-meanings" ${meta.readTermMeanings?'checked':''}>本文と一緒に熟語の意味も読む</label>
   <div class="rp-field rp-voice-field"><label for="rp-voice">日本語音声</label><select id="rp-voice" class="rp-input rp-voice-select">${voicesHTML()}</select></div>
   <details class="rp-reading-rules" id="rp-reading-rules" ${s.readingsOpen?'open':''}>
    <summary>読み方を登録 <span id="rp-rule-count">${meta.readings.length}件</span></summary>
@@ -699,11 +750,13 @@ function markSelected(color){selectionCapture();if(!s.selection.length){note('�
  else note('選択範囲を条文に結び付けられませんでした。');
 }
 function getArticle(id){return mem.get(s.lawId)?.articles.find(x=>x.id===id);}
-function speaker(){return typeof window.speechSynthesis!=='undefined'&&typeof window.SpeechSynthesisUtterance!=='undefined';}
-let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0,utterance=null,voiceStatus='停止中',activeSpeechArticle='';
+function nativeSpeech(){return typeof window.speechSynthesis!=='undefined'&&typeof window.SpeechSynthesisUtterance!=='undefined';}
+let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0,utterance=null,voiceStatus='停止中',activeSpeechArticle='',voiceKind='';
+let voiceEngine='',localPlayer=null,localPending=false,outputContext=null;
 function voicesHTML(){
  const voices=(window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
- return '<option value="">端末の既定音声</option>'+voices.map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
+ const builtIn=LOCAL_VOICE?.available?`<option value="builtin-ja" ${meta.voice==='builtin-ja'?'selected':''}>内蔵日本語音声</option>`:'';
+ return '<option value="">自動（同時再生を優先）</option>'+builtIn+voices.map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
 }
 function indicateSpeech(id){
  if(activeSpeechArticle)EL('rp-a-'+activeSpeechArticle)?.classList.remove('rp-reading-now');
@@ -712,18 +765,26 @@ function indicateSpeech(id){
 }
 function voiceState(t){
  voiceStatus=t;
- bgm.setSpeaking(speaking&&!paused&&utterance?.volume>0);
- const label=EL('rp-tts-state'),pause=EL('rp-voice-pause'),stop=EL('rp-voice-stop');
- if(label)label.textContent=t;
- if(pause){pause.disabled=!speaking;pause.textContent=paused?'再開':'一時停止';}
- if(stop)stop.disabled=!speaking;
+ bgm.setSpeaking(speaking&&!paused&&Boolean(utterance||localPlayer||(localPending&&segIndex>1))&&meta.voiceVolume>0);
+ for(const label of document.querySelectorAll('#rp-tts-state,[data-voice-state]'))label.textContent=t;
+ for(const control of document.querySelectorAll('#rp-voice-pause,[data-voice-pause]')){
+  control.disabled=!speaking;control.textContent=paused?'再開':'一時停止';
+ }
+ for(const control of document.querySelectorAll('#rp-voice-stop,[data-voice-stop]')){
+  control.disabled=!speaking||(control.dataset.audio==='stop-meaning'&&voiceKind!=='meaning');
+ }
 }
 function stopVoice(){
- const active=speaking||utterance;
- ++speakTokens;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;indicateSpeech('');
- if(active)try{window.speechSynthesis?.cancel();}catch{}
+ const native=voiceEngine==='native'&&speaking;
+ ++speakTokens;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;voiceKind='';voiceEngine='';localPending=false;indicateSpeech('');
+ localPlayer?.stop();localPlayer=null;
+ if(native)try{
+  window.speechSynthesis?.cancel();
+  if(window.speechSynthesis?.paused)window.speechSynthesis.resume();
+ }catch{}
  voiceState('停止中');
 }
+function stopMeaning(){if(voiceKind==='meaning')stopVoice();}
 function stopReaderAudio(){
  stopVoice();bgm.pause();EL('rp-mark-manager')?.remove();
 }
@@ -731,27 +792,133 @@ function splitSpeech(str){const parts=String(str).replace(/\s+/g,' ').match(/[^�
  for(const part of parts){let cur=part;while(cur.length>150){let cut=cur.lastIndexOf('、',150);if(cut<65)cut=150;else cut++;chunks.push(cur.slice(0,cut));cur=cur.slice(cut);}if(cur.trim())chunks.push(cur.trim());}
  return chunks.slice(0,1500);
 }
-function getVoice(){const voices=window.speechSynthesis?.getVoices?.()||[];return voices.find(x=>x.lang?.toLowerCase().startsWith('ja')&&(x.voiceURI===meta.voice))||voices.find(x=>x.lang?.toLowerCase().startsWith('ja'))||null;}
-function speakNext(token){if(token!==speakTokens||paused||utterance)return;if(segIndex>=segments.length){speaking=false;paused=false;indicateSpeech('');voiceState('読み上げ完了');return;}
- const segment=segments[segIndex++],utter=new SpeechSynthesisUtterance(segment.text);utterance=utter;indicateSpeech(segment.id);utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;utter.volume=meta.voiceVolume/100;const voice=getVoice();if(voice)utter.voice=voice;
- utter.onend=()=>{if(token===speakTokens){utterance=null;requestAnimationFrame(()=>speakNext(token));}};utter.onerror=(event)=>{if(token!==speakTokens)return;stopVoice();voiceState('端末の日本語音声をご確認ください');};
- voiceState(`読み上げ中 ${segIndex}/${segments.length}`);try{window.speechSynthesis.speak(utter);}catch(e){stopVoice();note('この端末では読み上げを開始できません。','bad');}
+function getVoice(){
+ const voices=(window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
+ return voices.find(voice=>voice.voiceURI===meta.voice)||voices.find(voice=>voice.localService)||voices[0]||null;
 }
-function startSpeech(items){stopVoice();if(!speaker()){note('このブラウザは音声読み上げに対応していません。OSとブラウザの音声機能をご確認ください。','bad');return;}
- const pronounce=LAW_VOICE.reader(meta.readings);
- segments=items.flatMap(item=>{
-  const text=item.parts.filter(part=>part.t).map(pronounce).join('。').replace(/。{2,}/g,'。');
-  return splitSpeech(text).map(fragment=>({id:item.id,text:fragment}));
+function scheduleNext(token){setTimeout(()=>speakNext(token),0);}
+function recoverNative(token){
+ if(token!==speakTokens)return;
+ utterance=null;
+ if(outputContext&&LOCAL_VOICE?.available){
+  voiceEngine='local';segIndex--;speakNext(token);return;
+ }
+ stopVoice();voiceState('端末の日本語音声をご確認ください');
+}
+function playLocal(segment,token){
+ localPending=true;
+ voiceState('内蔵日本語音声を準備中');
+ LOCAL_VOICE.synthesize(segment.text,meta.rate).then(wave=>{
+  if(token!==speakTokens)return;
+  localPending=false;
+  localPlayer=LOCAL_VOICE.player(outputContext,wave,meta.voiceVolume/100,()=>{
+   if(token!==speakTokens)return;
+   localPlayer=null;scheduleNext(token);
+  });
+  if(!paused)localPlayer.play();
+  voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}（内蔵音声）`);
+ }).catch(()=>{
+  if(token!==speakTokens)return;
+  localPending=false;stopVoice();voiceState('内蔵音声を読み込めませんでした。再度お試しください');
  });
- if(!segments.length){note('読み上げる文章を選択してください。');return;}speaking=true;paused=false;const token=speakTokens;speakNext(token);
+}
+function speakNext(token){
+ if(token!==speakTokens||paused||utterance||localPending||localPlayer)return;
+ if(segIndex>=segments.length){
+  speaking=false;paused=false;voiceKind='';voiceEngine='';indicateSpeech('');voiceState('読み上げ完了');return;
+ }
+ const segment=segments[segIndex++];
+ indicateSpeech(segment.id);
+ if(voiceEngine==='local'){playLocal(segment,token);return;}
+ const utter=new SpeechSynthesisUtterance(segment.text);
+ utterance=utter;
+ utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;utter.volume=meta.voiceVolume/100;
+ const voice=getVoice();if(voice)utter.voice=voice;
+ utter.onstart=()=>{if(token===speakTokens)bgm.keepPlaying();};
+ utter.onend=()=>{
+  if(token!==speakTokens)return;
+  utterance=null;scheduleNext(token);
+ };
+ utter.onerror=()=>recoverNative(token);
+ voiceState(`読み上げ中 ${segIndex}/${segments.length}`);
+ try{window.speechSynthesis.speak(utter);}catch{recoverNative(token);}
+}
+function meaningParts(term){
+ const reading=meta.readings.find(rule=>rule.word===term.name)?.reading||term.reading||term.name;
+ return [{t:reading+'。意味。'},...(term.definitions||[term.meaning]).map(meaning=>({t:meaning}))];
+}
+function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}){
+ stopVoice();
+ outputContext=LOCAL_VOICE?.available?bgm.voiceOutput():null;
+ if(!nativeSpeech()&&!outputContext){
+  voiceState('このブラウザでは読み上げを利用できません');
+  note('ブラウザと端末の日本語音声をご確認ください。','bad');return;
+ }
+ const useLocal=outputContext&&(meta.voice==='builtin-ja'||!getVoice()||(!meta.voice&&bgm.requested));
+ voiceEngine=useLocal?'local':'native';
+ const pronounce=LAW_VOICE.reader(meta.readings);
+ const explained=new Set();
+ segments=items.flatMap(item=>{
+  const utterances=[];
+  for(const part of item.parts){
+   if(!part.t)continue;
+   utterances.push(pronounce(part));
+   if(!withMeanings)continue;
+   for(const term of GUIDE?.termsIn(part,item.lawId)||[]){
+    if(explained.has(term.id))continue;
+    explained.add(term.id);
+    utterances.push(...meaningParts(term).slice(0,2).map(pronounce));
+   }
+  }
+  return splitSpeech(utterances.join('。').replace(/。{2,}/g,'。')).map(text=>({id:item.id||'',text}));
+ });
+ if(!segments.length){voiceEngine='';voiceState('読み上げる文章がありません');return;}
+ voiceKind=kind;speaking=true;paused=false;bgm.beforeSpeech();speakNext(speakTokens);
+}
+function speakMeaning(term){
+ if(term)startSpeech([{parts:meaningParts(term)}],{kind:'meaning',withMeanings:false});
+}
+function speakScreen(){
+ const root=EL('content');
+ if(!root)return;
+ if(readerRoute()){
+  selectionCapture();
+  if(s.selection.length)speechSelection();else speechPage();
+  return;
+ }
+ const selection=window.getSelection?.();
+ const range=selection?.rangeCount?selection.getRangeAt(0):null;
+ const selected=range&&root.contains(range.commonAncestorContainer)?String(selection).trim():'';
+ const lines=(selected||root.innerText).split(/\n+/).map(text=>text.trim()).filter(Boolean);
+ startSpeech([{parts:lines.map(t=>({t}))}]);
+}
+function speakCard(control){
+ const card=control.closest('.sg-card');
+ if(!card)return;
+ const visible=['.sg-card-title-line h4','.sg-card-prompt p','.sg-card-details[open] .sg-answer p','.sg-card-details[open] .sg-point p'];
+ const parts=visible.map(query=>({t:card.querySelector(query)?.textContent||''}));
+ startSpeech([{parts}]);
+}
+function handleAudioClick(event){
+ const control=event.target.closest('[data-audio]');
+ if(!control)return;
+ switch(control.dataset.audio){
+  case 'read-screen':speakScreen();break;
+  case 'read-card':speakCard(control);break;
+  case 'replay-meaning':speakMeaning(GUIDE?.getTerm(control.closest('[data-term-id]')?.dataset.termId));break;
+  case 'stop-meaning':stopMeaning();break;
+  case 'bgm':bgm.toggle();break;
+  case 'pause':togglePause();break;
+  case 'stop':stopVoice();break;
+ }
 }
 function speechArticle(article){
- return {id:article.id,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
+ return {id:article.id,lawId:s.lawId,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
 }
 function speechPage(){
  const law=mem.get(s.lawId);if(!law)return;
  const visible=shownArticles(law).slice((s.page-1)*s.pageSize,s.page*s.pageSize);
- startSpeech(visible.map(speechArticle));
+ startSpeech(visible.map(speechArticle),{kind:'law'});
 }
 function speechSelection(){
  selectionCapture();
@@ -764,11 +931,23 @@ function speechSelection(){
   const end=Math.min(selection.end,selection.start+remaining);
   const part=LAW_VOICE.sliceFragment(block,selection.start,end);
   remaining-=part.t.length;
-  items.push({id:selection.articleId,parts:[part]});
+  items.push({id:selection.articleId,lawId:s.lawId,parts:[part]});
  }
- startSpeech(items);
+ startSpeech(items,{kind:'law'});
 }
-function togglePause(){if(!speaker()||!speaking){note('先に読み上げを開始してください。');return;}try{if(paused){window.speechSynthesis.resume();paused=false;if(!utterance)speakNext(speakTokens);}else{window.speechSynthesis.pause();paused=true;}voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);}catch(e){note('一時停止に失敗しました。');}}
+function togglePause(){
+ if(!speaking){note('先に読み上げを開始してください。');return;}
+ try{
+  paused=!paused;
+  if(voiceEngine==='local'){
+   if(paused)localPlayer?.pause();
+   else if(localPlayer)localPlayer.play();
+   else speakNext(speakTokens);
+  }else if(paused)window.speechSynthesis.pause();
+  else{window.speechSynthesis.resume();if(!utterance)speakNext(speakTokens);}
+  voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);
+ }catch{note('一時停止に失敗しました。');}
+}
 function manageMarks(articleId){
  const list=meta.marks.filter(x=>x.lawId===s.lawId&&x.articleId===articleId);
  if(!list.length){note('この条文にはマーカーがありません。');return;}
@@ -831,7 +1010,7 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='marks-manage'){manageMarks(id);return;}
  if(op==='close-manager'){EL('rp-mark-manager')?.remove();return;}
  if(op==='delete-mark'){meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
- if(op==='speak-article'){const article=getArticle(id);if(article)startSpeech([speechArticle(article)]);return;}
+ if(op==='speak-article'){const article=getArticle(id);if(article)startSpeech([speechArticle(article)],{kind:'law'});return;}
  if(op==='speak-selection'){speechSelection();return;}
  if(op==='speak-page'){speechPage();return;}
  if(op==='toggle-bgm'){bgm.toggle();return;}
@@ -840,8 +1019,8 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='stop'){stopVoice();return;}
  if(op==='delete-law'){if(!confirm(`${selectedInfo().name}の保存済み本文を端末から削除しますか？\nマーカー・メモ・ブックマークは残ります。`))return;const lawId=s.lawId;mem.delete(lawId);storeDelete(lawId).then(()=>{refresh();note('本文データを削除しました。');}).catch(()=>note('保存済み本文を削除できませんでした。','bad'));refresh();return;}
 }
-function handlerInput(ev){const el=ev.target;if(!readerRoute())return;
- if(updateVolume(el))return;
+function handlerInput(ev){const el=ev.target;
+ if(updateVolume(el)||!readerRoute())return;
  if(!ev.isComposing&&el.id==='rp-textsearch'&&s.textFilter!==el.value.slice(0,150)){s.textFilter=el.value.slice(0,150);s.page=1;stopVoice();refresh({keepFocus:true});}
  if(!ev.isComposing&&el.id==='rp-lawfilter'&&s.lawFilter!==el.value.slice(0,150)){s.lawFilter=el.value.slice(0,150);refresh({keepFocus:true});}
  if(!ev.isComposing&&el.id==='rp-index-search'&&s.indexSearch!==el.value.slice(0,120)){s.indexSearch=el.value.slice(0,120);refresh({keepFocus:true});}
@@ -849,17 +1028,20 @@ function handlerInput(ev){const el=ev.target;if(!readerRoute())return;
   const key=bid(s.lawId,el.dataset.id);if(el.value.trim())meta.notes[key]=el.value.slice(0,4000);else delete meta.notes[key];writeMeta();
  }
 }
-function handlerChange(ev){const el=ev.target;if(!readerRoute())return;
+function handlerChange(ev){
+ const el=ev.target;
+ if(updateVolume(el)){writeMeta();return;}
+ if(/^(?:rp|ga)-voice$/.test(el.id)){meta.voice=el.value;syncAudioInputs();writeMeta();return;}
+ if(/^(?:rp|ga)-bgm-duck$/.test(el.id)){meta.bgmDuck=el.checked;syncAudioInputs();syncBgmSettings();writeMeta();return;}
+ if(/^(?:rp|ga)-read-meanings$/.test(el.id)){meta.readTermMeanings=el.checked;syncAudioInputs();writeMeta();return;}
+ if(/^(?:rp|ga)-rate$/.test(el.id)){meta.rate=Number(el.value)||1;syncAudioInputs();writeMeta();return;}
+ if(!readerRoute())return;
  if(el.id==='rp-scope'){stopVoice();s.articleScope=el.value;s.page=1;refresh({keepFocus:true});}
  if(el.id==='rp-toc'&&el.value)jumpTo(el.value);
- if(el.id==='rp-voice'){meta.voice=el.value;writeMeta();}
- if(el.id==='rp-bgm-duck'){meta.bgmDuck=el.checked;syncBgmSettings();writeMeta();}
- if(updateVolume(el))writeMeta();
- if(el.id==='rp-rate'){meta.rate=Number(el.value)||1;writeMeta();note('次の読み上げから速度を変更します。');}
  if(el.id==='rp-import'){const f=el.files?.[0];if(f)importXml(f);el.value='';}
 }
 let bound=false;
-function bind(){if(bound)return;bound=true;document.addEventListener('click',handlerClick);document.addEventListener('input',handlerInput);document.addEventListener('change',handlerChange);
+function bind(){if(bound)return;bound=true;document.addEventListener('click',handleAudioClick);document.addEventListener('click',handlerClick);document.addEventListener('input',handlerInput);document.addEventListener('change',handlerChange);
  document.addEventListener('compositionend',handlerInput);
  document.addEventListener('submit',saveReading);
  document.addEventListener('toggle',event=>{
@@ -873,7 +1055,9 @@ function bind(){if(bound)return;bound=true;document.addEventListener('click',han
    if(event.pointerType==='mouse')event.preventDefault();
   }else if(!event.target.closest('.rp-paragraph'))clearSelection();
  });
- window.speechSynthesis?.addEventListener?.('voiceschanged',()=>{const select=EL('rp-voice');if(select)select.innerHTML=voicesHTML();});
+ window.speechSynthesis?.addEventListener?.('voiceschanged',()=>{
+  for(const id of ['rp-voice','ga-voice']){const select=EL(id);if(select)select.innerHTML=voicesHTML();}
+ });
  document.addEventListener('selectionchange',()=>{if(readerRoute())selectionCapture();});
  document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){EL('rp-mark-manager')?.remove();if(s.selection.length)clearSelection(true);}
@@ -881,9 +1065,8 @@ function bind(){if(bound)return;bound=true;document.addEventListener('click',han
    const shown=shownArticles(mem.get(s.lawId));if(shown.length===1){e.preventDefault();jumpTo(shown[0].id);}
   }
  });
- document.addEventListener('visibilitychange',()=>{if(document.hidden)stopReaderAudio();});
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)bgm.keepPlaying();});
  window.addEventListener('pagehide',stopReaderAudio);
- window.addEventListener('hashchange',()=>{if(!readerRoute())stopReaderAudio();});
 }
 function exportMeta(){return JSON.parse(JSON.stringify(meta));}
 function importMeta(data){
@@ -891,9 +1074,9 @@ function importMeta(data){
  const previous=meta;meta=cleanMeta(data);
  if(!writeMeta()){meta=previous;return false;}
  s.lawId=allLaws().some(item=>item.id===meta.lastLaw)?meta.lastLaw:CATALOG[0][0];
- handledHash=null;stopReaderAudio();syncBgmSettings();refresh();return true;
+ handledHash=null;stopReaderAudio();syncBgmSettings();syncAudioInputs();refresh();return true;
 }
-function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopReaderAudio();syncBgmSettings();refresh();}
-window.GYOSHI_ROPPO={render:display,bind,stop:stopReaderAudio,references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
+function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopReaderAudio();syncBgmSettings();syncAudioInputs();refresh();}
+window.GYOSHI_ROPPO={render:display,bind,stop:stopVoice,globalAudioHTML,meaningAudioHTML,speakMeaning,stopMeaning,references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
 bind();
 })();

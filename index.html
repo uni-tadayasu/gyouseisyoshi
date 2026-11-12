@@ -7,32 +7,52 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="朱引文庫">
-  <meta name="description" content="行政書士試験の学習アプリ・朱引文庫。300問の演習、必修カード、主要六法と関連法令15本、用語解説、読み上げ、180分模試。PC・スマホ対応。">
+  <meta name="description" content="行政書士試験の学習アプリ・朱引文庫。300問の演習、必修カード、主要六法と関連法令15本、熟語辞典3,970語、音声読み上げ、180分模試。PC・スマホ対応。">
   <meta property="og:title" content="朱引文庫｜行政書士試験の演習と六法">
-  <meta property="og:description" content="300問の演習と法令15本を収録。条文検索、読み上げ、4色マーカーと模試を一つの書斎で。">
+  <meta property="og:description" content="300問の演習、法令15本、熟語辞典3,970語。条文と必修カードの熟語をその場で確認し、日本語音声で読み上げます。">
   <meta property="og:type" content="website">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:site_name" content="朱引文庫">
+  <meta property="og:image" content="./assets/icon-512.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="canonical" href="./">
   <title>朱引文庫｜行政書士試験の演習と六法</title>
   <link rel="icon" type="image/png" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=20261112-r5a">
-  <link rel="stylesheet" href="roppo.css?v=20261112-r5a">
-  <link rel="stylesheet" href="atelier.css?v=20261112-r5a">
-  <link rel="stylesheet" href="reading.css?v=20261112-r5a">
-  <link rel="stylesheet" href="study-guide.css?v=20261112-r5a">
+  <link rel="stylesheet" href="style.css?v=20261112-r6b">
+  <link rel="stylesheet" href="roppo.css?v=20261112-r6b">
+  <link rel="stylesheet" href="atelier.css?v=20261112-r6b">
+  <link rel="stylesheet" href="reading.css?v=20261112-r6b">
+  <link rel="stylesheet" href="study-guide.css?v=20261112-r6b">
+  <link rel="stylesheet" href="public.css?v=20261112-r6b">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"朱引文庫","inLanguage":"ja","applicationCategory":"EducationalApplication","operatingSystem":"Web browser","description":"行政書士試験の問題演習、必修カード、法令15本と熟語辞典3,970語を収録するWebアプリ。","offers":{"@type":"Offer","price":"0","priceCurrency":"JPY"}}</script>
 </head>
 <body>
-  <div id="app"><div class="booting"><div class="boot-logo">朱</div><strong>朱引文庫</strong><span>学習環境を準備しています…</span></div></div>
-  <script src="questions.js?v=20261112-r5a"></script>
-  <script src="advanced_questions.js?v=20261112-r5a"></script>
-  <script src="assets/pako_inflate.min.js?v=20261112-r5a"></script>
-  <script src="law-edition.js?v=20261112-r5a"></script>
-  <script src="law-voice.js?v=20261112-r5a"></script>
-  <script src="reader-bgm.js?v=20261112-r5a"></script>
-  <script src="study-cards.js?v=20261112-r5a"></script>
-  <script src="glossary-data.js?v=20261112-r5a"></script>
-  <script src="study-guide.js?v=20261112-r5a"></script>
-  <script src="roppo.js?v=20261112-r5a"></script>
-  <script src="app.js?v=20261112-r5a"></script>
+  <div id="app">
+   <main class="public-main public-index" aria-labelledby="public-title">
+    <p class="public-brand"><span aria-hidden="true">朱</span>朱引文庫</p>
+    <h1 id="public-title">行政書士試験の学習アプリ 朱引文庫</h1>
+    <p class="public-intro">300問の演習、44枚の必修カード、15法令、3,970語の熟語辞典を収録。用語の意味と条文の音声を聞きながら学習できます。</p>
+    <nav class="public-nav" aria-label="学習案内">
+ <a href="./">書斎</a><a href="learn.html">演習と必修カード</a><a href="laws.html">六法と関連法令</a><a href="dictionary.html">熟語辞典</a>
+</nav>
+    <noscript><p>問題演習や音声機能を開くには、ブラウザでJavaScriptを有効にしてください。</p></noscript>
+   </main>
+  </div>
+  <script src="questions.js?v=20261112-r6b"></script>
+  <script src="advanced_questions.js?v=20261112-r6b"></script>
+  <script src="assets/pako_inflate.min.js?v=20261112-r6b"></script>
+  <script src="law-edition.js?v=20261112-r6b"></script>
+  <script src="law-voice.js?v=20261112-r6b"></script>
+  <script src="reader-bgm.js?v=20261112-r6b"></script>
+  <script src="study-cards.js?v=20261112-r6b"></script>
+  <script src="glossary-data.js?v=20261112-r6b"></script>
+  <script src="compound-data.js?v=20261112-r6b"></script>
+  <script src="study-guide.js?v=20261112-r6b"></script>
+  <script src="local-voice.js?v=20261112-r6b"></script>
+  <script src="roppo.js?v=20261112-r6b"></script>
+  <script src="app.js?v=20261112-r6b"></script>
 </body>
 </html>

@@ -159,3 +159,42 @@
  .sg-card{break-inside:avoid}
  .sg-card-actions,.sg-filters,.sg-disclosure,.sg-term-dialog{display:none}
 }
+
+/* Shared controls for reading text and playing music in any section. */
+.ga-tools{position:relative;flex:none}
+.ga-tools>summary{display:grid;place-items:center;list-style:none;cursor:pointer;font:750 .73rem/1 var(--font);white-space:nowrap}
+.ga-tools>summary::-webkit-details-marker{display:none}
+.ga-tools[open]>summary{color:var(--accent);border-color:var(--accent)}
+.ga-panel{
+ position:absolute;inset-inline-end:0;top:calc(100% + 10px);width:min(366px,calc(100vw - 24px));
+ max-height:calc(100dvh - 110px);overflow:auto;z-index:5;padding:13px;
+ border:1px solid var(--line);border-top:3px solid var(--accent);
+ background:var(--surface);color:var(--ink);box-shadow:0 10px 32px #17252430;
+ font-size:.84rem;line-height:1.5;
+}
+.ga-controls,.ga-levels{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.ga-panel .ga-levels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}
+.ga-panel .ga-levels label{min-width:0}
+.ga-panel .ga-levels select{display:block;width:100%;margin-top:3px}
+.ga-panel .rp-duck-setting{font-size:.76rem;line-height:1.55;margin:8px 0 0}
+.ga-panel .rp-bgmbar{margin:9px 0;padding:6px 8px}
+.ga-status,.sg-meaning-audio .sg-meaning-status{margin:4px 0 0;font-size:.78rem;line-height:1.55;color:var(--ink)}
+.sg-card-title-line{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.sg-card-listen{
+ flex:none;min-height:30px;padding:2px 7px;background:var(--surface2);color:var(--accent);
+ border:1px solid var(--line);font:700 .75rem/1 var(--font);cursor:pointer;
+}
+.sg-card-listen:hover{border-color:var(--accent)}
+.sg-meaning-audio{margin:9px 0;padding:7px 8px;background:var(--surface2);border:1px solid var(--line)}
+.sg-meanings{margin:0;padding-inline-start:1.35em}
+.sg-meanings li+li{margin-top:4px}
+.sg-index-pagination{display:flex;align-items:center;justify-content:center;gap:11px;margin-top:13px}
+@media(max-width:670px){
+ .ga-tools{position:static}
+ .ga-panel{inset-inline:9px;top:100%;width:auto;max-height:calc(100dvh - 86px)}
+}
+@media(max-width:360px){
+ .top-actions .ga-tools>summary{width:33px;min-width:33px}
+ .ga-panel .ga-controls .button{padding-inline:7px}
+}
+@media print{.ga-tools,.sg-card-listen,.sg-meaning-audio{display:none}}

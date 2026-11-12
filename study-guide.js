@@ -3,7 +3,8 @@
 'use strict';
 
 const study=window.GYOSHI_STUDY_CARDS;
-const glossary=window.GYOSHI_GLOSSARY;
+const editorialGlossary=window.GYOSHI_GLOSSARY;
+const corpus=window.GYOSHI_COMPOUND_DATA||{laws:[],entries:[]};
 const laws={
  const:['321CONSTITUTION','日本国憲法'],
  civil:['129AC0000000089','民法'],
@@ -20,6 +21,16 @@ const laws={
  company:['417AC0000000086','会社法'],
  privacy:['415AC0000000057','個人情報保護法'],
  disclosure:['411AC0000000042','情報公開法']
+};
+const lawKeysById=new Map(Object.entries(laws).map(([key,[id]])=>[id,key]));
+const compoundTerms=corpus.entries.map(([name,reading,definitions,origin,mask,refs])=>({
+ id:'word-'+name,name,reading,definitions,meaning:definitions[0],origin,refs,aliases:[],
+ group:origin==='law'?'statutory':'compound',
+ lawKeys:corpus.laws.filter((id,index)=>mask&(1<<index)).map(id=>lawKeysById.get(id))
+}));
+const glossary={
+ groups:{...editorialGlossary.groups,compound:'熟語・一般語',statutory:'法令上の定義'},
+ terms:[...editorialGlossary.terms,...compoundTerms]
 };
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const searchKey=value=>String(value??'').normalize('NFKC').toLowerCase()
@@ -44,18 +55,38 @@ for(const term of glossary.terms){
   if(form===name)choices.unshift(term);else choices.push(term);
  }
 }
-const quotePattern=value=>value.replace(/[.*+?${}()|[\]\\]/g,'\\$&');
-const termPattern=new RegExp([...inlineForms.keys()].sort((a,b)=>b.length-a.length).map(quotePattern).join('|'),'gu');
+const wordTrie={children:new Map()};
+for(const [form,terms] of inlineForms){
+ let node=wordTrie;
+ for(let i=0;i<form.length;i++){
+  const char=form[i];
+  if(!node.children.has(char))node.children.set(char,{children:new Map()});
+  node=node.children.get(char);
+ }
+ node.terms=terms;
+}
+const segmenter=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'word'}):null;
+const referenceEnding=/((?:第[0-9〇零一二三四五六七八九十百千]+(?:条|項|号)(?:の[0-9〇零一二三四五六七八九十百千]+)*|[前同次](?:条|項|号)))中/gu;
+function wordBoundaries(input){
+ const blocked=new Uint8Array(input.length+1);
+ if(!segmenter)return blocked;
+ // The 中 after a reference is a particle-like connector, not the first half of a headword.
+ const split=input.replace(referenceEnding,'$1、');
+ for(const {segment,index} of segmenter.segment(split)){
+  if(inlineForms.has(segment))blocked.fill(1,index+1,index+segment.length);
+ }
+ return blocked;
+}
 const cardById=new Map(study.cards.map(card=>[card.id,card]));
 const termById=new Map(glossary.terms.map(term=>[term.id,term]));
-const sortedTerms=[...glossary.terms].sort((a,b)=>a.reading.localeCompare(b.reading,'ja'));
+const sortedTerms=[...glossary.terms].sort((a,b)=>(a.reading||a.name).localeCompare(b.reading||b.name,'ja')||a.name.localeCompare(b.name,'ja'));
 const indexTerms=sortedTerms.map(term=>({
  term,
- search:searchKey([term.name,term.reading,...term.aliases,term.meaning,glossary.groups[term.group]].join(' ')),
- laws:new Set(term.refs.map(([key])=>key))
+ search:searchKey([term.name,term.reading,...term.aliases,...(term.definitions||[term.meaning]),glossary.groups[term.group]].join(' ')),
+ laws:new Set([...term.refs.map(([key])=>key),...(term.lawKeys||[])])
 }));
 const termsByLaw=new Map(Object.values(laws).map(([id])=>[id,[]]));
-for(const term of glossary.terms){
+for(const term of editorialGlossary.terms){
  const forms=[term.name,...term.aliases].map(searchKey);
  const refs=new Map();
  for(const [key,number] of term.refs){
@@ -101,25 +132,40 @@ function rubyProjection(text,ruby){
   }
  };
 }
+function* termMatches(text,lawId,ruby){
+ const projected=rubyProjection(text,ruby);
+ const input=inlineKey(projected.text);
+ const blocked=wordBoundaries(input);
+ for(let index=0;index<input.length;){
+  let node=wordTrie,choices,end=index;
+  if(!blocked[index]){
+   for(let cursor=index;cursor<input.length;cursor++){
+    node=node.children.get(input[cursor]);
+    if(!node)break;
+    if(node.terms&&!blocked[cursor+1]){choices=node.terms;end=cursor+1;}
+   }
+  }
+  if(!choices){index++;continue;}
+  const term=(lawId&&choices.find(entry=>entry.refs.some(([key])=>laws[key][0]===lawId)))||choices[0];
+  yield {start:projected.toSource(index),end:projected.toSource(end),term};
+  index=end;
+ }
+}
 function inlineText(value,{lawId='',ruby,renderSlice}={}){
  const text=String(value??'');
  const render=renderSlice||((start,end)=>esc(text.slice(start,end)));
- const projected=rubyProjection(text,ruby);
- const input=inlineKey(projected.text);
  let html='',cursor=0;
- for(const match of input.matchAll(termPattern)){
-  const form=match[0];
-  const start=projected.toSource(match.index),end=projected.toSource(match.index+form.length);
-  if(start<cursor||end<=start)continue;
-  const choices=inlineForms.get(form);
-  // Canonical spellings come first within each law, followed by their aliases.
-  const term=(lawId&&choices.find(entry=>entry.refs.some(([key])=>laws[key][0]===lawId)))||choices[0];
+ for(const {start,end,term} of termMatches(text,lawId,ruby)){
+  if(start<cursor)continue;
   if(start>cursor)html+=render(cursor,start);
   html+=`<span class="sg-inline-term" role="button" tabindex="0" aria-haspopup="dialog" data-guide-term="${esc(term.id)}">${render(start,end)}</span>`;
   cursor=end;
  }
  if(cursor<text.length)html+=render(cursor,text.length);
  return html;
+}
+function termsIn(fragment,lawId=''){
+ return [...termMatches(fragment.t,lawId,fragment.ruby)].map(({term})=>term);
 }
 function fragmentText(text,ruby){return rubyProjection(text||'',ruby).text;}
 function forArticle(lawId,article){
@@ -156,7 +202,9 @@ function cardHTML(card,progress,openCards){
  const text=value=>inlineText(value,{lawId});
  return `<div class="sg-card">
   <div class="sg-card-prompt">
-   <h4 id="sg-card-title-${card.id}">${text(card.title)}</h4>
+   <div class="sg-card-title-line"><h4 id="sg-card-title-${card.id}">${text(card.title)}</h4>
+    <button type="button" class="sg-card-listen" data-audio="read-card" aria-label="${esc(card.title)}を読み上げ">読む</button>
+   </div>
    <p>${text(card.prompt)}</p>
   </div>
   <details class="sg-card-details" data-guide-card="${card.id}" ${openCards.has(card.id)?'open':''}>
@@ -230,21 +278,34 @@ function glossaryResults(view){
  const results=indexTerms.filter(({term,search,laws})=>
   (view.group==='all'||term.group===view.group)&&(view.law==='all'||laws.has(view.law))&&search.includes(keyword)
  );
- return `<p class="sg-result-count" role="status">${results.length}件</p>${
-  results.length?`<ul class="sg-index-list">${results.map(({term})=>`<li><button type="button" class="sg-index-item" data-guide-term="${esc(term.id)}">
+ if(keyword){
+  const rank=({term})=>searchKey(term.name)===keyword||searchKey(term.reading)===keyword?0:searchKey(term.name).startsWith(keyword)?1:2;
+  results.sort((a,b)=>rank(a)-rank(b));
+ }
+ const pageSize=60, pages=Math.max(1,Math.ceil(results.length/pageSize));
+ const page=Math.max(1,Math.min(pages,view.page||1));
+ const visible=results.slice((page-1)*pageSize,page*pageSize);
+ const count=`<p class="sg-result-count" role="status">${results.length.toLocaleString('ja-JP')}件</p>`;
+ if(!visible.length)return count+'<p class="sg-empty">該当する用語がありません。表記や絞り込み条件を変えて検索できます。</p>';
+ return count+`<ul class="sg-index-list">${visible.map(({term})=>`<li><button type="button" class="sg-index-item" data-guide-term="${esc(term.id)}">
    <span class="sg-index-word"><strong>${esc(term.name)}</strong><small>${esc(term.reading)}</small></span>
    <span class="sg-index-open" aria-hidden="true">›</span>
-  </button></li>`).join('')}</ul>`:'<p class="sg-empty">該当する用語がありません。表記や絞り込み条件を変えて検索できます。</p>'
- }`;
+  </button></li>`).join('')}</ul>${
+   pages>1?`<nav class="sg-index-pagination" aria-label="用語索引のページ">
+    <button type="button" class="button secondary small" data-action="glossaryPage" data-value="${page-1}" ${page===1?'disabled':''}>前へ</button>
+    <span>${page} / ${pages} ページ</span>
+    <button type="button" class="button secondary small" data-action="glossaryPage" data-value="${page+1}" ${page===pages?'disabled':''}>次へ</button>
+   </nav>`:''
+  }`;
 }
 function glossaryHTML(view){
  return `<div class="sg-page">
   <header class="sg-header">
-   <div><h1>用語索引</h1><p>用語を選ぶと、読み方、意味、具体例と参照条文を確認できます。</p></div>
+   <div><h1>用語索引</h1><p>${glossary.terms.length.toLocaleString('ja-JP')}語を検索できます。用語を選ぶと、意味を表示して読み上げます。</p></div>
    <a class="sg-ref" href="#roppo">六法書架 <span aria-hidden="true">→</span></a>
   </header>
   <div class="sg-filters sg-index-filters">
-   <label for="sg-search">用語・読み方<input class="text-input" id="sg-search" data-action="glossarySearch" type="search" maxlength="100" placeholder="例：審査請求、そうたつ" value="${esc(view.search)}"></label>
+   <label for="sg-search">用語・読み方・意味<input class="text-input" id="sg-search" data-action="glossarySearch" type="search" maxlength="100" placeholder="例：審査請求、そうたつ" value="${esc(view.search)}"></label>
    <label for="sg-index-group">科目<select class="select" id="sg-index-group" data-action="glossaryGroup">${groupOptions(glossary.groups,view.group)}</select></label>
    <label for="sg-index-law">法令<select class="select" id="sg-index-law" data-action="glossaryLaw">${options([['all','すべての法令'],...Object.entries(laws).map(([key,[,name]])=>[key,name])],view.law)}</select></label>
   </div>
@@ -252,9 +313,26 @@ function glossaryHTML(view){
  </div>`;
 }
 let dialog,trigger;
+function shownExample(button){
+ if(!button.classList.contains('sg-inline-term'))return '';
+ const paragraph=button.closest('.rp-paragraph,.rp-caption,.rp-topic,h3,h4,p');
+ if(!paragraph)return '';
+ const before=document.createRange();
+ before.selectNodeContents(paragraph);before.setEndBefore(button);
+ const offset=before.toString().length;
+ const source=paragraph.textContent,left=Math.max(0,offset-30),right=Math.min(source.length,offset+button.textContent.length+52);
+ return (left?'…':'')+source.slice(left,right)+(right<source.length?'…':'');
+}
+function termSource(term){
+ if(term.source)return term.source;
+ if(term.origin==='wordnet')return ['日本語WordNet 1.1','https://bond-lab.github.io/wnja/jpn/downloads.html'];
+ if(term.origin==='wiktionary')return ['ウィクショナリー日本語版の執筆者（CC BY-SA 4.0）','https://ja.wiktionary.org/wiki/'+encodeURIComponent(term.name)+'#日本語'];
+ return null;
+}
 function openTerm(id,button){
  const term=termById.get(id);
  if(!term)return;
+ const audio=window.GYOSHI_ROPPO;
  if(!dialog){
   dialog=document.createElement('dialog');
   dialog.className='sg-term-dialog';
@@ -263,6 +341,7 @@ function openTerm(id,button){
    if(event.target===dialog||event.target.closest('[data-guide-close],a[href^="#roppo?"]'))dialog.close();
   });
   dialog.addEventListener('close',()=>{
+   window.GYOSHI_ROPPO?.stopMeaning();
    if(trigger?.isConnected)trigger.focus({preventScroll:true});
    trigger=null;
   });
@@ -270,22 +349,29 @@ function openTerm(id,button){
  }
  trigger=button;
  const refs=sectionLinks(term.refs);
- const source=term.source?`<a class="sg-ref" href="${esc(term.source[1])}" target="_blank" rel="noopener noreferrer">${esc(term.source[0])} ↗</a>`:'';
- dialog.innerHTML=`<div class="sg-dialog-panel">
+ const attribution=termSource(term);
+ const source=attribution?`<a class="sg-ref" href="${esc(attribution[1])}" target="_blank" rel="noopener noreferrer">${esc(attribution[0])} ↗</a>`:'';
+ const example=term.example||shownExample(button);
+ const meanings=term.definitions||[term.meaning];
+ dialog.innerHTML=`<div class="sg-dialog-panel" data-term-id="${esc(term.id)}">
   <header class="sg-dialog-head">
    <div><p class="sg-dialog-topic">${esc(glossary.groups[term.group])}</p><h2 id="sg-term-title">${esc(term.name)}</h2></div>
    <button type="button" class="button secondary small" data-guide-close autofocus>閉じる</button>
   </header>
+  ${audio?.meaningAudioHTML()||''}
   <dl class="sg-term-description">
-   <div><dt>読み方</dt><dd>${esc(term.reading)}</dd></div>
-   <div><dt>意味</dt><dd>${esc(term.meaning)}</dd></div>
-   <div><dt>具体例</dt><dd>${esc(term.example)}</dd></div>
+   ${term.reading?`<div><dt>読み方</dt><dd>${esc(term.reading)}</dd></div>`:''}
+   <div><dt>${term.origin==='law'?'意味（条文の定義）':'意味'}</dt><dd>${
+    meanings.length>1?`<ol class="sg-meanings">${meanings.map(meaning=>`<li>${esc(meaning)}</li>`).join('')}</ol>`:esc(meanings[0])
+   }</dd></div>
+   ${example?`<div><dt>${term.example?'具体例':'本文での用例'}</dt><dd>${esc(example)}</dd></div>`:''}
    ${refs?`<div><dt>参照条文</dt><dd class="sg-links">${refs}</dd></div>`:''}
-   ${source?`<div><dt>参考資料</dt><dd>${source}</dd></div>`:''}
+   ${source?`<div><dt>出典</dt><dd>${source}</dd></div>`:''}
   </dl>
  </div>`;
  dialog.showModal();
  dialog.scrollTop=0;
+ audio?.speakMeaning(term);
 }
 document.addEventListener('click',event=>{
  const button=event.target.closest('[data-guide-term]');
@@ -306,7 +392,8 @@ document.addEventListener('keydown',event=>{
 window.addEventListener('hashchange',()=>{if(dialog?.open)dialog.close();});
 
 window.GYOSHI_GUIDE={
- cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,forArticle,inlineText,
+ cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,forArticle,inlineText,termsIn,
+ getTerm:id=>termById.get(id),
  getCard:id=>cardById.get(id),lawKey:id=>Object.keys(laws).find(key=>laws[key][0]===id)
 };
 })();

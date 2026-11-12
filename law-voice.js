@@ -36,7 +36,18 @@
   '行方不明':'ゆくえふめい','附則':'ふそく','但書':'ただしがき',
   '瑕疵かし':'かし','勾こう留':'こうりゅう','禁錮こ':'きんこ',
   '幇ほう助':'ほうじょ','誹謗ひぼう':'ひぼう','毀き損':'きそん',
-  '失踪':'しっそう','失踪そう':'しっそう'
+  '失踪':'しっそう','失踪そう':'しっそう',
+  '何人も':'なんぴとも','何人たりとも':'なんぴとたりとも','何人であっても':'なんぴとであっても',
+  '主務大臣':'しゅむだいじん','所轄庁':'しょかつちょう','専決':'せんけつ',
+  '徴収':'ちょうしゅう','受領':'じゅりょう','転付':'てんぷ','供用':'きょうよう',
+  '所掌':'しょしょう','従前':'じゅうぜん','労役場留置':'ろうえきじょうりゅうち',
+  '差押':'さしおさえ','差押状':'さしおさえじょう','附帯':'ふたい','欠缺':'けんけつ',
+  '斡旋':'あっせん','照会':'しょうかい','諮問':'しもん','答申':'とうしん',
+  '割愛':'かつあい','遡及':'そきゅう','原処分':'げんしょぶん','法定受託事務':'ほうていじゅたくじむ',
+  '登記簿':'とうきぼ','引受価額':'ひきうけかがく','仮執行':'かりしっこう',
+  '法廷':'ほうてい','受遺者':'じゅいしゃ','遺言執行者':'いごんしっこうしゃ',
+  '書留':'かきとめ','令和':'れいわ','時価':'じか','文書':'ぶんしょ',
+  '同項中':'どうこうちゅう、','同条中':'どうじょうちゅう、','前項中':'ぜんこうちゅう、'
  };
  const legacyKana={'あつて':'あって','もつて':'もって','よつて':'よって','なつた':'なった','しなければならなかつた':'しなければならなかった'};
  const kana=/^[\u3041-\u3096\u309D\u309E\u30A1-\u30FA\u30FD\u30FEー]+$/u;
@@ -45,7 +56,7 @@
  const pronunciations=['れい','いち','に','さん','よん','ご','ろく','なな','はち','きゅう'];
  const units={分款:'ぶんかん',編:'へん',部:'ぶ',章:'しょう',節:'せつ',款:'かん',目:'もく',条:'じょう',項:'こう',号:'ごう'};
  const numericCharacters='0-9０-９〇零一二三四五六七八九十百千';
- const legalNumber=new RegExp('第(['+numericCharacters+']+)('+Object.keys(units).join('|')+')((?:の['+numericCharacters+']+)*)','gu');
+ const legalNumber=new RegExp('第(['+numericCharacters+']+)('+Object.keys(units).join('|')+')((?:の['+numericCharacters+']+)*)(中?)','gu');
 
  function numberValue(source){
   const value=source.normalize('NFKC').replace(/零/g,'〇');
@@ -79,10 +90,10 @@
   return reading+(n%10?pronunciations[n%10]:'');
  }
 
- function numberReading(match,base,unit,branches,offset,source){
+ function numberReading(match,base,unit,branches,inside,offset,source){
   const main=spellNumber(base),sub=branches.split('の').filter(Boolean).map(spellNumber);
   if(!main||sub.some(reading=>!reading))return match;
-  return 'だい'+main+units[unit]+sub.map(reading=>'の'+reading).join('')+(source[offset+match.length]==='第'?'、':'');
+  return 'だい'+main+units[unit]+sub.map(reading=>'の'+reading).join('')+(inside?'ちゅう、':source[offset+match.length]==='第'?'、':'');
  }
 
  function cleanReadings(value){
@@ -121,36 +132,65 @@
   return {plain:plain+t.slice(from),hints};
  }
 
- function withReadings(plain,hints,words,pattern){
+ function withReadings(plain,hints,words,pattern,readGap){
   let output='',from=0,hint=0;
   function plainUntil(end){
    while(hint<hints.length&&hints[hint].end<=end){
     const ruby=hints[hint++];
     if(ruby.start<from)continue;
-    output+=plain.slice(from,ruby.start)+ruby.reading;
+    output+=readGap(plain.slice(from,ruby.start))+ruby.reading;
     from=ruby.end;
    }
-   output+=plain.slice(from,end);
+   output+=readGap(plain.slice(from,end));
    from=end;
   }
   for(const match of plain.matchAll(pattern)){
    plainUntil(match.index);
-   output+=words.get(match[0]);
+   const exactRuby=hints[hint];
+   output+=exactRuby?.start===match.index&&exactRuby.end===match.index+match[0].length?exactRuby.reading:words.get(match[0]);
    from=match.index+match[0].length;
   }
   plainUntil(plain.length);
   return output;
  }
 
+ const segmenter=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'word'}):null;
+ const nonNumeric=/[\p{Script=Han}々]/u;
+ const ambiguous=new Set(['何人','一日','二日','三日','四日','五日','六日','七日','八日','九日','十日','二十日','月','日','方','後','上','中','間','等','者','他','長']);
+ const dateNumber=new RegExp('(['+numericCharacters+']+)年(['+numericCharacters+']+)月(['+numericCharacters+']+)日','gu');
+ const days={1:'ついたち',2:'ふつか',3:'みっか',4:'よっか',5:'いつか',6:'むいか',7:'なのか',8:'ようか',9:'ここのか',10:'とおか',14:'じゅうよっか',20:'はつか',24:'にじゅうよっか'};
+ const months=['','いち','に','さん','し','ご','ろく','しち','はち','く','じゅう','じゅういち','じゅうに'];
+
  function reader(custom){
-  const words=new Map([...Object.entries(terms),...Object.entries(legacyKana)]);
+  const data=window.GYOSHI_COMPOUND_DATA;
+  const ordinary=data?.readings||{};
+  const editorial=window.GYOSHI_GLOSSARY?.terms||[];
+  const words=new Map();
+  for(const [word,reading,,origin] of data?.entries||[]){
+   if(reading&&(origin==='original'||origin==='law')&&word.length>=2&&!ambiguous.has(word))words.set(word,reading);
+  }
+  for(const term of editorial)if(term.reading&&nonNumeric.test(term.name))words.set(term.name,term.reading);
+  for(const [word,reading] of [...Object.entries(terms),...Object.entries(legacyKana)])words.set(word,reading);
   for(const {word,reading} of cleanReadings(custom))words.set(word,reading);
   const literals=[...words.keys()].sort((a,b)=>b.length-a.length)
    .map(text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
   const pattern=new RegExp(literals.join('|'),'gu');
+  function readGap(text){
+   const numbered=text.replace(dateNumber,(source,year,month,day)=>{
+    const y=spellNumber(year),m=numberValue(month),d=numberValue(day);
+    return y&&months[m]&&d>=1&&d<=31?y+'ねん'+months[m]+'がつ'+(days[d]||spellNumber(day)+'にち'):source;
+   }).replace(legalNumber,numberReading);
+   if(!segmenter)return numbered;
+   let result='';
+   for(const part of segmenter.segment(numbered)){
+    const word=part.segment;
+    result+=part.isWordLike&&nonNumeric.test(word)&&!ambiguous.has(word)&&Object.hasOwn(ordinary,word)?ordinary[word]:word;
+   }
+   return result;
+  }
   return fragment=>{
    const {plain,hints}=stripRuby(fragment.t,fragment.ruby);
-   return withReadings(plain,hints,words,pattern).replace(legalNumber,numberReading);
+   return withReadings(plain,hints,words,pattern,readGap);
   };
  }
 

@@ -18,8 +18,8 @@ const shuffle=a=>{let x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
 const routeFromURL=()=>location.hash.slice(1).split('?')[0];
 const glossaryViewFromURL=()=>{
- const id=new URLSearchParams(location.hash.split('?')[1]||'').get('law');
- return {search:'',group:'all',law:GUIDE?.lawKey(id)||'all'};
+ const params=new URLSearchParams(location.hash.split('?')[1]||'');
+ return {search:(params.get('q')||'').slice(0,100),group:'all',law:GUIDE?.lawKey(params.get('law'))||'all',page:1};
 };
 const questionSearchText=q=>fold([q.q,q.t,q.x,q.r,q.ref,q.s,...(q.type==='mc'?q.o:[])].filter(Boolean).join(' '));
 const validOrder=(order,n)=>Array.isArray(order)&&order.length===n&&new Set(order).size===n&&order.every(i=>Number.isInteger(i)&&i>=0&&i<n);
@@ -102,7 +102,7 @@ function finishTimedPractice(){const p=ui.practice;if(!p||p.finished)return;
  p.finished=true;state.history.push({id:String(Date.now()),type:'practice',at:Date.now(),count:p.items.length,answered:p.results.length,accuracy:PC(p.results.reduce((a,x)=>a+x.ratio,0),p.results.length),mode:p.mode,subject:p.subject,duration:Date.now()-p.startedAt,timed:true});state.history=state.history.slice(-500);persistPractice();render();toast('制限時間に達したため、演習を終了しました。');}
 function replaceHash(next){if(routeFromURL()!==next)history.pushState(null,'','#'+next);}
 function go(next){
- if(route==='roppo'&&next!=='roppo')window.GYOSHI_ROPPO?.stop();
+ if(route!==next)window.GYOSHI_ROPPO?.stop();
   if(!TABS.some(t=>t[0]===next))return;
   route=next;replaceHash(next);
  if(next==='glossary')ui.glossary=glossaryViewFromURL();
@@ -112,7 +112,7 @@ function go(next){
 function activeTab(x){return route===x?'active':'';}
 function navButton(t){return `<button class="nav-btn ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}" aria-current="${route===t[0]?'page':'false'}"><span class="ico">${t[2]}</span><span>${t[1]}</span></button>`;}
 function mount(){
- app.innerHTML=`<div class="layout"><a class="skip-content" href="#content" data-action="skipContent">本文へ移動</a><div class="side-scrim" id="scrim" data-action="closeSide"></div><aside class="sidebar" id="sidebar" aria-label="メインナビゲーション"><div class="brand"><div class="brand-mark">朱</div><div><div class="brand-title">朱引文庫</div><div class="brand-sub">SHUBIKI BUNKO <span>／ 2027</span></div><div class="brand-caption">行政書士試験のための書斎</div></div></div><div class="side-section">学習</div><nav class="side-nav">${[TABS[0],TABS[10],...TABS.slice(1,5),TABS[11]].map(navButton).join('')}</nav><div class="side-section">試験対策</div><nav class="side-nav">${TABS.slice(5,8).map(navButton).join('')}</nav><div class="side-section">学習記録</div><nav class="side-nav">${TABS.slice(8,10).map(navButton).join('')}</nav><div class="side-bottom"><div class="side-daily"><div class="side-daily-label">今日の学習目標</div><div class="side-daily-value" id="side-daily-count">0 <span>/ ${state.settings.goal}問</span></div><div class="progress-track"><div class="progress-fill" id="side-daily-bar" style="width:0%"></div></div><p class="tiny" id="side-daily-desc" style="margin:11px 0 0;color:#9cb0be">今日も少しずつ積み重ねましょう</p></div><div class="side-note"><span class="side-note-mark">朱</span><span>一問一葉、知を綴る。<small>OFFLINE STUDY · PRIVATE ARCHIVE</small></span></div></div></aside><div class="shell"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">☰</button><div><div class="topbar-kicker">朱引文庫</div><div id="top-title" class="topbar-title">ダッシュボード</div></div></div><div class="top-actions"><span class="network-chip" id="network-state" aria-label="接続状況">●</span><span class="date-chip" id="header-date">${dateStr(Date.now())}</span><button class="icon-btn" data-action="theme" title="テーマ変更" aria-label="ダークモード切替">◐</button><button class="icon-btn" data-action="nav" data-value="settings" title="設定" aria-label="設定を開く">⚙</button></div></header><main class="content" id="content" tabindex="-1"></main><footer class="main-footer"><span class="footer-brand">朱引文庫 <small>— SHUBIKI BUNKO —</small></span> · 自作学習問題 ${D.questions.length}問 · <a href="https://www.gyosei-shiken.or.jp/doc/guide/guide.html" target="_blank" rel="noopener noreferrer">公式試験案内</a> · 令和8年度試験の情報を基礎にしています。法令改正・判例の最新情報は必ず一次資料を確認してください。<br>問題は独自作成の学習用で、公式過去問の転載ではありません。試験の合否を保証するものではありません。</footer></div><nav class="mobile-nav" aria-label="モバイルナビゲーション">${[TABS[0],TABS[10],TABS[1],TABS[2],TABS[4],TABS[5]].map(t=>`<button class="mobile-tab ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}"><span class="ico">${t[2]}</span>${({dashboard:'書斎',essentials:'これだけ',study:'演習',weak:'復習',roppo:'六法',mock:'模試'})[t[0]]||t[1]}</button>`).join('')}</nav><div id="toasts" class="toast-region" aria-live="polite"></div><div id="modal-host"></div><input type="file" accept=".json,application/json" id="import-file" hidden></div>`;
+ app.innerHTML=`<div class="layout"><a class="skip-content" href="#content" data-action="skipContent">本文へ移動</a><div class="side-scrim" id="scrim" data-action="closeSide"></div><aside class="sidebar" id="sidebar" aria-label="メインナビゲーション"><div class="brand"><div class="brand-mark">朱</div><div><div class="brand-title">朱引文庫</div><div class="brand-sub">SHUBIKI BUNKO <span>／ 2027</span></div><div class="brand-caption">行政書士試験のための書斎</div></div></div><div class="side-section">学習</div><nav class="side-nav">${[TABS[0],TABS[10],...TABS.slice(1,5),TABS[11]].map(navButton).join('')}</nav><div class="side-section">試験対策</div><nav class="side-nav">${TABS.slice(5,8).map(navButton).join('')}</nav><div class="side-section">学習記録</div><nav class="side-nav">${TABS.slice(8,10).map(navButton).join('')}</nav><div class="side-bottom"><div class="side-daily"><div class="side-daily-label">今日の学習目標</div><div class="side-daily-value" id="side-daily-count">0 <span>/ ${state.settings.goal}問</span></div><div class="progress-track"><div class="progress-fill" id="side-daily-bar" style="width:0%"></div></div><p class="tiny" id="side-daily-desc" style="margin:11px 0 0;color:#9cb0be">今日も少しずつ積み重ねましょう</p></div><div class="side-note"><span class="side-note-mark">朱</span><span>一問一葉、知を綴る。<small>OFFLINE STUDY · PRIVATE ARCHIVE</small></span></div></div></aside><div class="shell"><header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="icon-btn menu-btn" data-action="menu" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">☰</button><div><div class="topbar-kicker">朱引文庫</div><div id="top-title" class="topbar-title">ダッシュボード</div></div></div><div class="top-actions"><span class="network-chip" id="network-state" aria-label="接続状況">●</span><span class="date-chip" id="header-date">${dateStr(Date.now())}</span>${window.GYOSHI_ROPPO?.globalAudioHTML()||''}<button class="icon-btn" data-action="theme" title="テーマ変更" aria-label="ダークモード切替">◐</button><button class="icon-btn" data-action="nav" data-value="settings" title="設定" aria-label="設定を開く">⚙</button></div></header><main class="content" id="content" tabindex="-1"></main><footer class="main-footer"><span class="footer-brand">朱引文庫 <small>— SHUBIKI BUNKO —</small></span> · 自作学習問題 ${D.questions.length}問 · <a href="https://www.gyosei-shiken.or.jp/doc/guide/guide.html" target="_blank" rel="noopener noreferrer">公式試験案内</a> · 令和8年度試験の情報を基礎にしています。法令改正・判例の最新情報は必ず一次資料を確認してください。<br>問題は独自作成の学習用で、公式過去問の転載ではありません。試験の合否を保証するものではありません。<nav class="public-footer-nav" aria-label="学習案内"><a href="learn.html">演習と必修カード</a><a href="laws.html">六法と関連法令</a><a href="dictionary.html">熟語辞典</a></nav></footer></div><nav class="mobile-nav" aria-label="モバイルナビゲーション">${[TABS[0],TABS[10],TABS[1],TABS[2],TABS[4],TABS[5]].map(t=>`<button class="mobile-tab ${activeTab(t[0])}" data-action="nav" data-value="${t[0]}"><span class="ico">${t[2]}</span>${({dashboard:'書斎',essentials:'これだけ',study:'演習',weak:'復習',roppo:'六法',mock:'模試'})[t[0]]||t[1]}</button>`).join('')}</nav><div id="toasts" class="toast-region" aria-live="polite"></div><div id="modal-host"></div><input type="file" accept=".json,application/json" id="import-file" hidden></div>`;
 }
 function render(options={}){
  const y=options.keepScroll?window.scrollY:0;
@@ -124,7 +124,7 @@ function render(options={}){
   button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false');
  }
  app.querySelector('.menu-btn').setAttribute('aria-expanded',String(ui.sidebar));document.documentElement.dataset.theme=state.settings.theme;document.documentElement.dataset.readable=state.settings.readable?'large':'normal';const net=document.getElementById('network-state');if(net){net.textContent=navigator.onLine?'● 接続中':'○ オフライン';net.dataset.offline=navigator.onLine?'false':'true';}
- const title=TABS.find(t=>t[0]===route)?.[1]||'ダッシュボード';document.getElementById('top-title').textContent=title;document.title=title+'｜朱引文庫 — 行政書士試験の書斎';
+ const title=TABS.find(t=>t[0]===route)?.[1]||'ダッシュボード';document.getElementById('top-title').textContent=title;document.title=route==='dashboard'?'朱引文庫｜行政書士試験の演習と六法':title+'｜朱引文庫 — 行政書士試験の書斎';
  document.getElementById('sidebar').classList.toggle('open',ui.sidebar);document.getElementById('scrim').classList.toggle('show',ui.sidebar);
  const content=document.getElementById('content');
  switch(route){case'dashboard':content.innerHTML=homeHTML()+dashboardEnhancementsHTML();break;case'study':content.innerHTML=ui.practice?practiceHTML():studyHTML();break;case'weak':content.innerHTML=weakHTML();break;case'library':content.innerHTML=libraryHTML();break;case'roppo':content.innerHTML=window.GYOSHI_ROPPO?.render()||'<p>六法ライブラリを読み込めません。</p>';break;case'essentials':content.innerHTML=GUIDE?.essentialsHTML(state.essentials,ui.guide)||'<p>必修カードを読み込めません。</p>';break;case'glossary':content.innerHTML=GUIDE?.glossaryHTML(ui.glossary)||'<p>用語索引を読み込めません。</p>';break;case'planner':content.innerHTML=plannerHTML();break;case'mock':content.innerHTML=mockHTML()+(state.exam&&!state.exam.finished?'':mockArchiveShortcutHTML());break;case'written':content.innerHTML=writtenHTML();break;case'records':content.innerHTML=ui.archiveViewing?archivedMockHTML():recordsHTML()+recordsEnhancementsHTML();break;case'settings':content.innerHTML=settingsHTML()+advancedSettingsHTML();break;}
@@ -152,7 +152,7 @@ function homeHTML(){
   <div class="hero-mast"><span>SHUBIKI BUNKO / THE STUDY FOLIOS</span><span>二〇二七 受験の書斎</span></div>
   <div class="hero-inner">
     
-    <h1>学んだ一行が、<br><em>明日の確信</em>になる。</h1>
+    <h1>行政書士試験の<br><em>書斎</em></h1>
     <p>300問の演習と180分の模試。六法書架では、主要六法と試験関連法令の条文にマーカーやメモを残せます。</p>
     <div class="hero-ctas"> ${ui.practice&&!ui.practice.finished?'<button class="button gold" data-action="nav" data-value="study">前回の演習を再開する →</button>':'<button class="button gold" data-action="quickStart">今日の10問を解く →</button>'}<button class="button dark-ghost" data-action="nav" data-value="roppo">六法書架をひらく</button><button class="button dark-ghost" data-action="nav" data-value="mock">模試へ進む</button></div>
   </div>
@@ -441,6 +441,11 @@ function clickAction(ev){const b=ev.target.closest('[data-action]');if(!b)return
  switch(a){
   case 'skipContent':ev.preventDefault();document.getElementById('content').focus();break;
   case 'nav':ui.archiveViewing=null;go(v);break;
+  case 'glossaryPage':
+   ui.glossary.page=Math.max(1,Number(v)||1);updateGlossaryResults();
+   document.getElementById('sg-index-results')?.scrollIntoView({block:'start'});
+   document.querySelector('#sg-index-results .sg-index-item')?.focus({preventScroll:true});
+   break;
   case 'guideMark':{
    if(!GUIDE?.getCard(id)||!['known','review'].includes(v))break;
    const progress={...state.essentials};
@@ -525,8 +530,8 @@ function changeAction(ev){const el=ev.target,a=el.dataset.action,field=el.datase
  case 'weakSearch':ui.weakSearch=el.value.trim().slice(0,200);render({keepScroll:true});break;
  case 'guideGroup':ui.guide.group=el.value;render({keepScroll:true});break;
  case 'guideStatus':ui.guide.status=el.value;render({keepScroll:true});break;
- case 'glossaryGroup':ui.glossary.group=el.value;updateGlossaryResults();break;
- case 'glossaryLaw':ui.glossary.law=el.value;updateGlossaryResults();break;
+ case 'glossaryGroup':ui.glossary.group=el.value;ui.glossary.page=1;updateGlossaryResults();break;
+ case 'glossaryLaw':ui.glossary.law=el.value;ui.glossary.page=1;updateGlossaryResults();break;
  case 'libraryType':ui.library.type=el.value;ui.library.page=1;render({keepScroll:true});break;
  case 'libraryCat':ui.library.c=el.value;ui.library.page=1;render({keepScroll:true});break;
  case 'settingDailyMinutes':state.settings.dailyMinutes=cap(Number(el.value)||45,10,240);save();render({keepScroll:true});break;
@@ -543,7 +548,7 @@ function updateGlossaryResults(){
 }
 function inputAction(ev){const el=ev.target,a=el.dataset.action;
  if(!ev.isComposing&&a==='glossarySearch'&&ui.glossary.search!==el.value.slice(0,100)){
-  ui.glossary.search=el.value.slice(0,100);updateGlossaryResults();
+  ui.glossary.search=el.value.slice(0,100);ui.glossary.page=1;updateGlossaryResults();
  }
  if(!ev.isComposing&&a==='librarySearch'&&ui.library.search!==el.value.slice(0,120)){
   ui.library.search=el.value.slice(0,120);ui.library.page=1;render({keepScroll:true});
@@ -580,7 +585,7 @@ document.addEventListener('keydown',keyboard);
 window.addEventListener('hashchange',()=>{
  const next=routeFromURL()||'dashboard';
  if(!TABS.some(tab=>tab[0]===next))return;
- if(route==='roppo'&&next!=='roppo')window.GYOSHI_ROPPO?.stop();
+ if(route!==next)window.GYOSHI_ROPPO?.stop();
  route=next;ui.modal=null;ui.sidebar=false;
  if(next==='glossary')ui.glossary=glossaryViewFromURL();
  render();window.scrollTo(0,0);

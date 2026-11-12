@@ -1,0 +1,31 @@
+.public-page{
+ margin:0;background:#f1eee4;color:#2a322c;
+ font:16px/1.8 "Noto Sans CJK JP","Hiragino Sans","Yu Gothic",Meiryo,sans-serif;
+}
+.public-head,.public-footer,.public-main{max-width:980px;margin:0 auto;padding-inline:clamp(14px,4vw,34px)}
+.public-head,.public-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding-block:14px}
+.public-head{border-bottom:1px solid #d5cbba}
+.public-footer{border-top:1px solid #d5cbba;font-size:.83rem}
+.public-brand{display:inline-flex;align-items:center;gap:8px;color:#263733;font-family:"Noto Serif CJK JP","Yu Mincho",serif;font-weight:750;text-decoration:none}
+.public-brand span{display:inline-grid;place-items:center;width:33px;height:33px;color:#fff;background:#a54435;border:2px solid #89392e}
+.public-nav,.public-actions,.public-footer-nav{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px}
+.public-footer-nav{margin-top:7px}
+.public-nav a,.public-main a,.public-footer a{color:#963a2c;text-underline-offset:.19em}
+.public-main{padding-block:clamp(25px,5vw,65px);overflow-wrap:anywhere}
+.public-main h1,.public-main h2,.public-main h3{font-family:"Noto Serif CJK JP","Hiragino Mincho ProN","Yu Mincho",serif;line-height:1.55}
+.public-main h1{font-size:clamp(1.7rem,4vw,2.45rem);margin:0 0 11px}
+.public-main h2{font-size:1.25rem;margin:0 0 8px}
+.public-main h3{font-size:1.04rem;margin:0 0 6px}
+.public-main section{margin-top:32px;padding-top:16px;border-top:1px solid #d5cbba}
+.public-intro{max-width:720px;margin:0 0 15px}
+.public-main a.public-primary{padding:7px 11px;color:#fff;background:#923d31;text-decoration:none;font-weight:700}
+.public-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));gap:11px}
+.public-cards article,.public-definitions>div,.public-law-list li{border:1px solid #d5cbba;background:#fbf8ef;padding:11px 13px}
+.public-cards article p{margin:0 0 8px}
+.public-law-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:7px}
+.public-law-list li span{display:block;font-size:.84rem}
+.public-definitions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,275px),1fr));gap:7px;margin:0}
+.public-definitions dt{font-weight:700}.public-definitions dt span{font-weight:400;font-size:.86rem}.public-definitions dd{margin:3px 0 0}
+.public-index{max-width:790px;margin:0 auto;background:var(--surface,#fbf8ef)}
+.public-index .public-brand{margin-top:0}
+.public-page a:focus-visible,.public-index a:focus-visible{outline:2px solid #9d4435;outline-offset:3px}

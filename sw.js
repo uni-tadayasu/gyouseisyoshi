@@ -1,9 +1,10 @@
 /* Offline files for this release, scoped to its GitHub Pages directory. */
-const release='20261112-r5a';
+const release='20261112-r6b';
 const scope=new URL(self.registration.scope);
 const prefix='shubiki-bunko:'+scope.pathname+':';
 const cacheName=prefix+release;
 const index=new URL('index.html',scope).href;
+const voiceDirectory=new URL('assets/voice/',scope).pathname;
 const music=new URL('assets/hear-your-voice.mp3?v='+release,scope).href;
 const ids=[
  '321CONSTITUTION','129AC0000000089','140AC0000000045','132AC0000000048','408AC0000000109',
@@ -11,11 +12,11 @@ const ids=[
  '322AC0000000067','326AC1000000004','417AC0000000086','415AC0000000057','411AC0000000042','index'
 ];
 const files=new Set([
- ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','questions.js','advanced_questions.js',
-     'app.js','roppo.js','study-cards.js','glossary-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
+ ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','public.css','questions.js','advanced_questions.js',
+     'app.js','roppo.js','study-cards.js','glossary-data.js','compound-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','local-voice.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
      .map(path=>new URL(path+'?v='+release,scope).href),
  music,
- ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png'].map(path=>new URL(path,scope).href)
+ ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png','learn.html','laws.html','dictionary.html'].map(path=>new URL(path,scope).href)
 ]);
 self.addEventListener('install',event=>event.waitUntil((async()=>{
  const cache=await caches.open(cacheName);
@@ -56,6 +57,15 @@ self.addEventListener('fetch',event=>{
     if(online.ok)return online;
    }catch{}
    return await (await caches.open(cacheName)).match(index)||Response.error();
+  })());
+ }else if(url.pathname.startsWith(voiceDirectory)){
+  event.respondWith((async()=>{
+   const cache=await caches.open(cacheName);
+   const cached=await cache.match(request);
+   if(cached)return cached;
+   const response=await fetch(request);
+   if(response.ok)try{await cache.put(request,response.clone());}catch{}
+   return response;
   })());
  }else if(files.has(url.href)){
   event.respondWith((async()=>{
