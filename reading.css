@@ -1,0 +1,50 @@
+/* 朱引文庫の書架とタッチ操作 */
+[hidden]{display:none!important}
+.skip-content{position:fixed;top:10px;left:10px;z-index:400;transform:translateY(-160%);padding:10px 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.skip-content:focus{transform:none}
+.law-links{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.law-links .button{text-decoration:none;max-width:100%;white-space:normal}
+.rp-page-banner{min-height:135px;padding:23px 33px}
+.rp-banner-symbol{font-size:146px;top:-24px}
+.rp-reader-head{padding-bottom:12px;margin-bottom:0}
+.rp-statusrow{padding:10px 0}
+.rp-readtools{margin:14px 0 8px}
+.rp-filter{min-height:38px}
+.rp-mini{width:38px;height:39px;min-width:38px;flex:none}
+.rp-art-actions{flex-wrap:wrap}
+.rp-navigation-row{display:flex;align-items:center;gap:8px;margin:0 0 9px}
+.rp-navigation-row select{flex:1;min-width:0}
+.rp-navigation-row button{flex:none}
+.rp-reader-controls>summary,.rp-add-tools>summary{cursor:pointer;color:var(--accent);padding:8px 0;font-size:12px;font-weight:700}
+.rp-reader-controls{margin:3px 0 13px;border-bottom:1px dotted var(--line)}
+.rp-reader-controls .rp-annotation-tools{margin-top:4px}
+.rp-voice-select{width:min(175px,100%);font-size:13px}
+.rp-reading-now{border-left-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.rp-article:focus{outline:2px solid var(--accent);outline-offset:2px}
+.rp-saved{border:1px solid var(--line);background:var(--surface);margin:0 0 13px}
+.rp-saved button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;text-align:left;padding:9px 13px;color:var(--ink);background:none;border:0;font-weight:700}
+.rp-saved button:hover{background:var(--surface2)}
+.rp-saved-list button{border-top:1px dotted var(--line);flex-wrap:wrap}
+.rp-saved button small{color:var(--muted);font-size:11px;font-weight:500}
+.rp-selection-tray{position:fixed;z-index:48;right:max(14px,env(safe-area-inset-right));bottom:max(17px,env(safe-area-inset-bottom));width:min(304px,calc(100% - 28px));padding:12px;background:var(--surface);border:1px solid var(--line);border-top:3px solid #a94332;box-shadow:0 10px 28px #16282b35;display:grid;gap:7px}
+.rp-selection-tray-header{display:flex;justify-content:space-between;align-items:center;gap:7px}
+.rp-selection-tray-header strong{font:750 14px var(--serif)}
+.rp-selection-tray .rp-mini{height:32px}
+.rp-selection-tray .rp-color-row{width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.rp-selection-tray .rp-paint{justify-content:center;padding:5px 3px}
+.rp-article-body .rp-mark{color:inherit!important}
+[data-theme="dark"] .rp-article-body .rp-yellow{background:#735d31}
+[data-theme="dark"] .rp-article-body .rp-mint{background:#356050}
+[data-theme="dark"] .rp-article-body .rp-pink{background:#774855}
+[data-theme="dark"] .rp-article-body .rp-blue{background:#385a7b}
+[data-readable="large"] .rp-article-body{font-size:clamp(18px,2.2vw,21px)}
+.rp-paint:focus-visible,.rp-mini:focus-visible{outline-offset:1px}
+@media(max-width:760px){.rp-page-banner{min-height:118px;padding:19px 23px}.rp-page-banner h1{font-size:clamp(20px,5.5vw,26px)}}
+@media(max-width:670px){
+ .rp-selection-tray{bottom:calc(67px + env(safe-area-inset-bottom))}
+ .rp-input,.rp-textarea,.library-form .text-input,.question-card .text-area{font-size:16px}
+ .rp-source-actions .rp-button,.rp-mini,.rp-filter{min-height:41px}
+ .rp-article-top{flex-wrap:wrap}
+ .rp-article-top .rp-art-actions{margin-left:0}
+}
+@media print{.rp-navigation-row,.rp-saved,.rp-selection-tray,.rp-reader-controls,.skip-content{display:none!important}}

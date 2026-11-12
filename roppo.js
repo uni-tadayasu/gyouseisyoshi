@@ -28,17 +28,89 @@ const LISTAPI='https://laws.e-gov.go.jp/api/1/lawlists/2';
 const ESC=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const EL=id=>document.getElementById(id);
 const NF=n=>Number(n||0).toLocaleString('ja-JP');
+
 const COLORS=['yellow','mint','pink','blue'];
-function fresh(){return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[]};}
+const EDITION=window.GYOSHI_EDITION;
+const readerRoute=()=>location.hash.split('?')[0]==='#roppo';
+const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
+const articlePattern=/^(preamble|main-[0-9_]+|suppl-[0-9]+-([0-9_]+|text)|appendix-[0-9]+|section-[0-9]+)$/;
+const legalDigits='0-9〇零一二三四五六七八九十百千';
+const articleQuery=new RegExp('^第?(['+legalDigits+']+)(?:条)?((?:[のノ_-]['+legalDigits+']+)*)$');
+function jpNumber(value){
+ if(/^\d{1,6}$/.test(value))return String(Number(value));
+ const digits='〇一二三四五六七八九';
+ const units={十:10,百:100,千:1000};
+ const chars=[...value.replace(/零/g,'〇')];
+ if(!chars.every(c=>digits.includes(c)||units[c]))return '';
+ if(!chars.some(c=>units[c]))return String(Number(chars.map(c=>digits.indexOf(c)).join('')));
+ let total=0,digit=null,lastUnit=10000;
+ for(const c of chars){
+  if(units[c]){
+   if(units[c]>=lastUnit)return '';
+   total+=(digit??1)*units[c];lastUnit=units[c];digit=null;
+  }else{
+   if(digit!==null)return '';
+   digit=digits.indexOf(c);
+  }
+ }
+ return String(total+(digit??0));
+}
+function articleNumber(value){
+ const match=fold(value).replace(/\s+/g,'').match(articleQuery);
+ if(!match)return '';
+ const numbers=[match[1],...match[2].split(/[のノ_-]/).filter(Boolean)].map(jpNumber);
+ return numbers.every(Boolean)?numbers.join('_'):'';
+}
+function lawURL(law,article=''){
+ const query=new URLSearchParams({law});
+ if(article)query.set('article',article);
+ return '#roppo?'+query;
+}
+function articleLabel(id){
+ if(id==='preamble')return '前文';
+ const number=id.replace(/^main-|^suppl-[0-9]+-/,'');
+ if(!/^[0-9]+(?:_[0-9]+)*$/.test(number))return '条文';
+ const [first,...branches]=number.split('_');
+ return '第'+first+'条'+branches.map(branch=>'の'+branch).join('');
+}
+function references(source){
+ const aliases=new Map(CATALOG.map(([id,name])=>[name,id]));
+ aliases.set('憲法','321CONSTITUTION');
+ aliases.set('個人情報保護法','415AC0000000057');
+ aliases.set('情報公開法','411AC0000000042');
+ const text=fold(source);
+ const names=[...text.matchAll(new RegExp([...aliases.keys()].sort((a,b)=>b.length-a.length).join('|'),'g'))];
+ const pattern=new RegExp('第?['+legalDigits+']+条(?:の['+legalDigits+']+)*','g');
+ const result=new Map();
+ for(const [index,found] of names.entries()){
+  const law=aliases.get(found[0]),name=CATALOG.find(row=>row[0]===law)[1];
+  const tail=text.slice(found.index+found[0].length,names[index+1]?.index);
+  const numbers=[...tail.matchAll(pattern)].map(match=>articleNumber(match[0])).filter(Boolean);
+  if(tail.startsWith('前文'))result.set(lawURL(law,'preamble'),name+'前文');
+  for(const number of numbers){
+   const article='main-'+number;
+   result.set(lawURL(law,article),name+articleLabel(article));
+  }
+  if(!numbers.length&&!tail.startsWith('前文'))result.set(lawURL(law),name);
+ }
+ return [...result].slice(0,6).map(([href,label])=>({href,label}));
+}
+function fingerprint(text){
+ let hash=2166136261;
+ for(let i=0;i<text.length;i++)hash=Math.imul(hash^text.charCodeAt(i),16777619);
+ return (hash>>>0).toString(36);
+}
+function fresh(){return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{}};}
 function cleanMeta(m){
  const f=fresh();if(!m||typeof m!=='object'||Array.isArray(m))return f;
- f.marks=Array.isArray(m.marks)?m.marks.filter(x=>x&&typeof x.lawId==='string'&&typeof x.articleId==='string'&&Number.isInteger(x.block)&&Number.isInteger(x.start)&&Number.isInteger(x.end)&&x.start>=0&&x.end>x.start&&x.end-x.start<=10000&&COLORS.includes(x.color)).slice(-15000).map(x=>({id:String(x.id||'m'+Date.now()),lawId:x.lawId,articleId:x.articleId,block:x.block,start:x.start,end:x.end,color:x.color,at:Number(x.at)||Date.now(),excerpt:String(x.excerpt||'').slice(0,160),stale:x.stale===true})):[];
+ f.marks=Array.isArray(m.marks)?m.marks.filter(x=>x&&typeof x.lawId==='string'&&typeof x.articleId==='string'&&Number.isInteger(x.block)&&Number.isInteger(x.start)&&Number.isInteger(x.end)&&x.start>=0&&x.end>x.start&&x.end-x.start<=10000&&COLORS.includes(x.color)).slice(-15000).map(x=>({id:String(x.id||'m'+Date.now()),lawId:x.lawId,articleId:x.articleId,block:x.block,start:x.start,end:x.end,color:x.color,at:Number(x.at)||Date.now(),excerpt:String(x.excerpt||'').slice(0,160),stale:x.stale===true,checksum:typeof x.checksum==='string'?x.checksum.slice(0,16):''})):[];
  f.bookmarks=Array.isArray(m.bookmarks)?[...new Set(m.bookmarks.filter(x=>typeof x==='string'&&x.length<200))].slice(0,3000):[];
  f.notes=m.notes&&typeof m.notes==='object'&&!Array.isArray(m.notes)?Object.fromEntries(Object.entries(m.notes).filter(([k,v])=>typeof k==='string'&&typeof v==='string').slice(0,3000).map(([k,v])=>[k,v.slice(0,4000)])):{};
  f.rate=[.7,.85,1,1.15,1.3,1.5].includes(Number(m.rate))?Number(m.rate):1;
  f.voice=typeof m.voice==='string'?m.voice.slice(0,300):'';
  f.lastLaw=typeof m.lastLaw==='string'?m.lastLaw:'321CONSTITUTION';
  f.custom=Array.isArray(m.custom)?m.custom.filter(x=>x&&/^[0-9A-Z]{10,22}$/.test(x.id)&&typeof x.name==='string').slice(0,100).map(x=>({id:x.id,name:x.name.slice(0,80),group:'追加法令',topic:'インポート'})):[];
+ f.positions=m.positions&&typeof m.positions==='object'?Object.fromEntries(Object.entries(m.positions).filter(([key,val])=>/^[0-9A-Z]{10,22}$/.test(key)&&articlePattern.test(val)).slice(0,115)):{};
  return f;
 }
 let meta;try{meta=cleanMeta(JSON.parse(localStorage.getItem(METAKEY)||'null'));}catch(e){meta=fresh();}
@@ -58,8 +130,10 @@ async function storeGet(id){const d=await db();return new Promise((resolve,rejec
 async function storePut(value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 async function storeDelete(id){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 const mem=new Map();
-const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],selectedText:'',pendingImport:false};
-let mountVersion=0,lawReqToken=0,officialIndex=null,indexLoadedAt=null;
+const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],selectedText:'',readingPack:false,packError:'',savedOpen:false,savedPage:1,controlsOpen:false,noteIds:new Set(),addOpen:false};
+let lawReqToken=0,officialIndex=null,indexLoadedAt=null,indexBundled=false;
+let handledHash=null,requestedArticle='';
+const readRequests=new Map();
 const allLaws=()=>[...CATALOG.map(([id,name,group,topic])=>({id,name,group,topic})),...meta.custom];
 const selectedInfo=()=>allLaws().find(x=>x.id===s.lawId)||{id:s.lawId,name:s.lawId,group:'追加法令',topic:''};
 const bid=(law,art)=>law+'::'+art;
@@ -67,7 +141,7 @@ function note(msg,type='info'){
  const host=EL('toasts');if(host){const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=msg;host.appendChild(el);setTimeout(()=>el.remove(),4500);}
  else if(type==='bad')console.warn(msg);
 }
-function timeText(iso){const d=new Date(iso);return !iso||isNaN(d)?'—':d.toLocaleString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function timeText(iso){const d=new Date(iso);return !iso||isNaN(d)?'—':d.toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function normalizeText(str){return String(str||'').replace(/[\r\n\t ]+/g,' ').replace(/\s{2,}/g,' ').trim();}
 function directChild(parent,name){return [...(parent?.children||[])].find(n=>n.localName===name)||null;}
 function directChildren(parent,name){return [...(parent?.children||[])].filter(n=>n.localName===name);}
@@ -100,6 +174,8 @@ function findHead(a){for(let x=a.parentElement;x&&x.localName!=='MainProvision'&
 function readXml(xml,id,imported=false){
  const doc=new DOMParser().parseFromString(xml,'application/xml');if(doc.querySelector('parsererror'))throw Error('XMLの構文が正しくありません。');
  const result=doc.querySelector('DataRoot > Result > Code');if(result&&result.textContent.trim()!=='0')throw Error('e-Gov API がエラーを返しました：'+(doc.querySelector('Result > Message')?.textContent||result.textContent));
+ const responseId=doc.querySelector('ApplData > LawId')?.textContent.trim();
+ if(responseId&&responseId!==id)throw Error('法令IDが一致しません。');
  const root=doc.querySelector('LawFullText > Law')||doc.querySelector('Law');if(!root)throw Error('e-Gov法令標準XMLの Law 要素が見つかりません。');
  const body=directChild(root,'LawBody');if(!body)throw Error('法令本文の LawBody が見つかりません。');
  const name=childText(body,'LawTitle')||selectedInfo().name;
@@ -113,12 +189,14 @@ function readXml(xml,id,imported=false){
   nodes.forEach((a,i)=>articles.push(extractArticle(a,'suppl-'+k,i+1,name,heading)));
   if(!nodes.length){const text=normalizeText(sup.textContent);if(text)articles.push({id:'suppl-'+k+'-text',title:heading,caption:'',number:'',heading,zone:'suppl-'+k,blocks:[{t:text,indent:0}],search:(heading+' '+text).toLowerCase()});}
  }
- for(const [i,part] of [...body.children].filter(c=>/^(Appdx|AppdxTable|AppdxStyle|AppdxFig|AppdxNote|AppdxFormat|AppdxForm|AppdxList)/.test(c.localName)).entries()){
+ const appendices=[...body.children].filter(c=>c.localName.startsWith('Appdx'));
+ appendices.push(...directChildren(body,'SupplProvision').flatMap(el=>[...el.children].filter(c=>c.localName.startsWith('SupplProvisionAppdx'))));
+ for(const [i,part] of appendices.entries()){
   const label=[...part.children].filter(c=>/Title$/.test(c.localName)).map(x=>normalizeText(x.textContent)).filter(Boolean).join(' ')||'別表・別記 '+(i+1);
   const text=normalizeText(part.textContent);if(text)articles.push({id:'appendix-'+i,title:label,caption:'',number:'',heading:'別表・別記',zone:'appendix',blocks:[{t:text,indent:0}],search:(label+' '+text).toLowerCase()});
  }
  // ArticleだけでなくParagraphのみの法令（条建てでない法令）も表示可能にする
- if(!articles.length&&main){let j=0;for(const node of [...main.children]){const text=normalizeText(node.textContent);if(text)articles.push({id:'section-'+j,title:'本文 '+(++j),caption:'',number:'',heading:'本則',zone:'main',blocks:[{t:text,indent:0}],search:text.toLowerCase()});}}
+ if(main&&!articles.some(a=>a.zone==='main'&&a.id!=='preamble')){let j=0;for(const node of [...main.children]){const text=normalizeText(node.textContent);if(text)articles.push({id:'section-'+j,title:'本文 '+(++j),caption:'',number:'',heading:'本則',zone:'main',blocks:[{t:text,indent:0}],search:text.toLowerCase()});}}
  if(!articles.length)throw Error('このXMLから表示できる条文を抽出できませんでした。');
  const plainChars=articles.reduce((n,a)=>n+a.blocks.reduce((t,b)=>t+b.t.length,0),0);
  if(plainChars>5000000)throw Error('本文が大きすぎるため、読み込みを中止しました。');
@@ -127,7 +205,16 @@ function readXml(xml,id,imported=false){
 async function loadOfficialIndex(force=false){
  if(s.loadingIndex)return;s.loadingIndex=true;s.indexError='';refresh();
  try{
-  if(!force){const saved=await storeGet('__official_list__').catch(()=>null);if(saved?.list?.length){officialIndex=saved.list;indexLoadedAt=saved.at;return;}}
+  if(!force){
+   const saved=await storeGet('__official_list__').catch(()=>null);
+   if(saved?.list?.length&&(!EDITION||Date.parse(saved.at)>=Date.parse(EDITION.snapshot))){
+    officialIndex=saved.list;indexLoadedAt=saved.at;indexBundled=false;return;
+   }
+   if(EDITION){
+    try{officialIndex=await EDITION.loadIndex();indexLoadedAt=EDITION.snapshot;indexBundled=true;return;}
+    catch(error){if(saved?.list?.length){officialIndex=saved.list;indexLoadedAt=saved.at;return;}}
+   }
+  }
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
   let r;try{r=await fetch(LISTAPI,{mode:'cors',signal:controller.signal,cache:'no-store'});}finally{clearTimeout(timeout);}
   if(!r.ok)throw Error('HTTP '+r.status);
@@ -136,7 +223,7 @@ async function loadOfficialIndex(force=false){
   const result=doc.querySelector('DataRoot > Result > Code');if(result&&result.textContent.trim()!=='0')throw Error('公式法令一覧APIがエラーを返しました。');
   const lawlist=[...doc.querySelectorAll('LawNameListInfo')].map(x=>({id:childText(x,'LawId'),name:childText(x,'LawName'),no:childText(x,'LawNo')})).filter(x=>/^[0-9A-Z]{10,22}$/.test(x.id)&&x.name);
   if(!lawlist.length)throw Error('法令一覧が空でした。');
-  officialIndex=lawlist;indexLoadedAt=new Date().toISOString();
+  officialIndex=lawlist;indexLoadedAt=new Date().toISOString();indexBundled=false;
   await storePut({id:'__official_list__',list:lawlist,at:indexLoadedAt}).catch(()=>{});
   note(`公式法令一覧を${NF(lawlist.length)}件読み込みました。`);
  }catch(e){s.indexError='法令一覧の取得に失敗しました。通信環境・API提供状況をご確認ください：'+e.message;}
@@ -145,27 +232,86 @@ async function loadOfficialIndex(force=false){
 function officialSearchHTML(){
  if(!s.indexOpen)return '';
  if(!officialIndex)return `<p class="rp-muted">e-Govの「憲法・法律」一覧を取得し、法令名から追加できます。初回には通信が必要です。</p><button class="rp-button rp-secondary rp-full" data-rp="load-index" ${s.loadingIndex?'disabled':''}>${s.loadingIndex?'取得中…':'↓ 公式法令一覧を読み込む'}</button>${s.indexError?`<p class="rp-index-error" role="alert">${ESC(s.indexError)}</p>`:''}`;
- const term=s.indexSearch.trim().toLowerCase(),hits=term?officialIndex.filter(x=>x.name.toLowerCase().includes(term)||x.no.toLowerCase().includes(term)):[];
- return `<label class="rp-custom-label" for="rp-index-search">法令名・法令番号で検索</label><input class="rp-input" id="rp-index-search" type="search" placeholder="例：民法、行政手続法" value="${ESC(s.indexSearch)}"><div class="rp-index-meta">${NF(officialIndex.length)}件 · 一覧取得 ${timeText(indexLoadedAt)}</div><div class="rp-index-results">${!term?'<div class="rp-mini-empty">検索したい法令名を入力してください。</div>':hits.length?hits.slice(0,22).map(x=>`<button data-rp="add-index" data-id="${x.id}" data-name="${ESC(x.name)}"><strong>${ESC(x.name)}</strong><small>${ESC(x.no)} · 本文を取得する</small></button>`).join(''):'<div class="rp-mini-empty">法令名が見つかりません。</div>'}</div>${hits.length>22?`<div class="rp-muted">${NF(hits.length)}件中、先頭22件を表示</div>`:''}<button class="rp-link" data-rp="load-index" ${s.loadingIndex?'disabled':''}>公式一覧を更新</button>${s.indexError?`<p class="rp-index-error" role="alert">${ESC(s.indexError)}</p>`:''}`;
+ const term=fold(s.indexSearch),hits=term?officialIndex.filter(x=>fold(x.name).includes(term)||fold(x.no).includes(term)||fold(x.id).includes(term)):[];
+ return `<label class="rp-custom-label" for="rp-index-search">法令名・法令番号で検索</label><input class="rp-input" id="rp-index-search" type="search" placeholder="例：民法、行政手続法" value="${ESC(s.indexSearch)}"><div class="rp-index-meta">${NF(officialIndex.length)}件 · 目録${indexBundled?'収録':'取得'} ${timeText(indexLoadedAt)}</div><div class="rp-index-results">${!term?'<div class="rp-mini-empty">検索したい法令名を入力してください。</div>':hits.length?hits.slice(0,22).map(x=>`<button data-rp="add-index" data-id="${x.id}" data-name="${ESC(x.name)}"><strong>${ESC(x.name)}</strong><small>${ESC(x.no)} · 本文を取得する</small></button>`).join(''):'<div class="rp-mini-empty">法令名が見つかりません。</div>'}</div>${hits.length>22?`<div class="rp-muted">${NF(hits.length)}件中、先頭22件を表示</div>`:''}<button class="rp-link" data-rp="load-index" ${s.loadingIndex?'disabled':''}>公式一覧を更新</button>${s.indexError?`<p class="rp-index-error" role="alert">${ESC(s.indexError)}</p>`:''}`;
 }
-async function cacheRead(id){if(mem.has(id))return mem.get(id);try{const item=await storeGet(id);if(item){mem.set(id,item);return item;}return null;}catch(e){return null;}}
-function reanchor(doc){
- // 法改正で条文内の文字位置が変わった際、誤った位置へのマーカー移動を防ぐ
+
+function reanchor(doc,previous){
+ const articles=new Map(doc.articles.map(a=>[a.id,a]));
+ const oldArticles=new Map(previous?.articles.map(a=>[a.id,a])||[]);
  let changed=false;
- for(const m of meta.marks){if(m.lawId!==doc.id)continue;
-  const a=doc.articles.find(a=>a.id===m.articleId),block=a?.blocks[m.block],snippet=m.excerpt||'';
-  if(block&&snippet&&block.t.slice(m.start,m.start+snippet.length)===snippet){if(m.stale){m.stale=false;changed=true;}continue;}
-  if(a&&snippet&&snippet.length===m.end-m.start){
-   const hits=[];for(let i=0;i<a.blocks.length;i++){const t=a.blocks[i].t;let n=t.indexOf(snippet);while(n>=0){hits.push({block:i,start:n});n=t.indexOf(snippet,n+1);}}
-   if(hits.length===1){m.block=hits[0].block;m.start=hits[0].start;m.end=m.start+snippet.length;m.stale=false;changed=true;continue;}
+ for(const mark of meta.marks){
+  if(mark.lawId!==doc.id)continue;
+  const article=articles.get(mark.articleId),length=mark.end-mark.start;
+  const old=oldArticles.get(mark.articleId)?.blocks[mark.block]?.t?.slice(mark.start,mark.end);
+  const excerpt=mark.excerpt||'';
+  const complete=excerpt.length===length?excerpt:old?.length===length&&old.startsWith(excerpt)?old:'';
+  const exact=article?.blocks[mark.block]?.t?.slice(mark.start,mark.end);
+  if(exact?.length===length&&(mark.checksum?fingerprint(exact)===mark.checksum:complete&&exact===complete)){
+   if(mark.stale){mark.stale=false;changed=true;}continue;
   }
-  if(!m.stale){m.stale=true;changed=true;}
+  if(article&&complete){
+   let hit=null,multiple=false;
+   for(const [index,block] of article.blocks.entries()){
+    const start=block.t.indexOf(complete);if(start<0)continue;
+    if(hit||block.t.indexOf(complete,start+1)>=0){multiple=true;break;}
+    hit={index,start};
+   }
+   if(hit&&!multiple){
+    mark.block=hit.index;mark.start=hit.start;mark.end=hit.start+length;mark.stale=false;
+    changed=true;continue;
+   }
+  }
+  if(!mark.stale){mark.stale=true;changed=true;}
  }
- if(changed){writeMeta();note('条文更新に伴い、マーカーを照合しました。位置を確認できないものはマーカー管理から確認してください。');}
+ if(changed)writeMeta();
 }
-async function cacheWrite(doc){reanchor(doc);mem.set(doc.id,doc);const custom=meta.custom.find(x=>x.id===doc.id);if(custom&&custom.name!==doc.name){custom.name=doc.name;writeMeta();}try{await storePut(doc);return true;}catch(e){note('法令データを端末に保存できませんでした。今回の閲覧中のみ保持します。','bad');return false;}}
-async function ensureSelected(){const token=++lawReqToken,id=s.lawId;if(mem.has(id))return;
- const cached=await cacheRead(id);if(token!==lawReqToken)return;if(cached){refresh();}
+async function cacheWrite(doc){
+ reanchor(doc,mem.get(doc.id));mem.set(doc.id,doc);
+ const custom=meta.custom.find(x=>x.id===doc.id);
+ if(custom&&custom.name!==doc.name){custom.name=doc.name;writeMeta();}
+ try{await storePut(doc);return true;}
+ catch(error){note('本文を端末に保存できません。現在の閲覧中は利用できます。','bad');return false;}
+}
+function readerLoad(id){
+ if(mem.has(id))return Promise.resolve(mem.get(id));
+ if(readRequests.has(id))return readRequests.get(id);
+ const loading=(async()=>{
+  const cached=await storeGet(id).catch(()=>null);
+  if(mem.has(id))return mem.get(id);
+  if(cached&&(!EDITION?.has(id)||cached.imported||Date.parse(cached.fetchedAt)>=Date.parse(EDITION.snapshot))){
+   mem.set(id,cached);return cached;
+  }
+  if(!EDITION?.has(id))return null;
+  try{
+   const xml=await EDITION.loadLaw(id);
+   if(mem.has(id))return mem.get(id);
+   const doc=readXml(xml,id);
+   doc.bundled=true;doc.source='e-Gov法令API Version1（収録版）';doc.fetchedAt=EDITION.snapshot;
+   if(cached)reanchor(doc,cached);
+   mem.set(id,doc);return doc;
+  }catch(error){
+   if(!cached)throw error;
+   if(!mem.has(id))mem.set(id,cached);
+   return mem.get(id);
+  }
+ })().finally(()=>readRequests.delete(id));
+ readRequests.set(id,loading);
+ return loading;
+}
+async function ensureSelected(){
+ const token=++lawReqToken,id=s.lawId;
+ try{
+  const doc=await readerLoad(id);
+  if(token!==lawReqToken||!readerRoute())return;
+  s.readingPack=false;
+  if(doc&&requestedArticle){
+   const target=requestedArticle;requestedArticle='';jumpTo(target);
+  }else refresh({keepFocus:true});
+ }catch(error){
+  if(token!==lawReqToken||!readerRoute())return;
+  s.readingPack=false;s.packError=error.message;refresh({keepFocus:true});
+ }
 }
 async function fetchOne(id,{silent=false}={}){
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
@@ -179,28 +325,74 @@ async function fetchOne(id,{silent=false}={}){
 }
 async function fetchCurrent(force=false){
  if(s.loading||s.fetchingAll)return;const id=s.lawId;if(!force&&mem.has(id))return;
- s.loading=true;s.error='';refresh();try{await fetchOne(id);s.page=1;s.textFilter='';note(selectedInfo().name+'の条文を取得しました。');}
- catch(e){s.error='公式法令データを取得できませんでした。ネット接続・API提供状況をご確認ください。e-GovからXMLを保存して「XMLを取り込む」も利用できます。詳細：'+(e.name==='AbortError'?'通信がタイムアウトしました':e.message);}
+ s.loading=true;s.error='';refresh();try{
+  const doc=await fetchOne(id);
+  if(s.lawId===id&&requestedArticle){const target=requestedArticle;requestedArticle='';jumpTo(target);}
+  note(doc.name+'の条文を取得しました。');
+ }
+ catch(e){if(s.lawId===id)s.error='公式法令データを取得できませんでした。ネット接続・API提供状況をご確認ください。e-GovからXMLを保存して「XMLを取り込む」も利用できます。詳細：'+(e.name==='AbortError'?'通信がタイムアウトしました':e.message);}
  finally{s.loading=false;refresh();}
 }
 async function fetchSix(){if(s.fetchingAll||s.loading)return;s.fetchingAll=true;s.bulkStatus='六法の取得を開始しています';refresh();let success=0;
  for(let i=0;i<6;i++){const [id,name]=CATALOG[i];s.bulkStatus=`六法を保存中 ${i+1}/6：${name}`;refresh();try{await fetchOne(id);success++;}catch(e){s.bulkStatus=`${name} の取得に失敗。続行します。`;refresh();}}
  s.fetchingAll=false;s.bulkStatus='';refresh();note(`六法のうち${success}/6法令を取得・保存しました。${success<6?'通信に失敗した法令は個別に再取得できます。':''}`);
 }
-function onSelect(id){if(!allLaws().some(x=>x.id===id))return;stopVoice();s.lawId=id;meta.lastLaw=id;writeMeta();s.page=1;s.articleScope='main';s.textFilter='';s.onlyMarked=false;s.onlyBookmarked=false;s.mobileCatalog=false;s.error='';s.selection=[];s.selectedText='';++lawReqToken;refresh();ensureSelected();}
-function shownArticles(doc){if(!doc)return [];
- const search=s.textFilter.trim().toLowerCase();return doc.articles.filter(a=>{
+
+function setLaw(id){
+ stopVoice();s.lawId=id;meta.lastLaw=id;writeMeta();
+ s.page=1;s.articleScope='main';s.textFilter='';s.onlyMarked=false;s.onlyBookmarked=false;
+ s.mobileCatalog=false;s.error='';s.packError='';s.noteIds.clear();clearSelection();
+ s.readingPack=!mem.has(id)&&Boolean(EDITION?.has(id));++lawReqToken;
+}
+function onSelect(id,article=''){
+ if(!allLaws().some(x=>x.id===id))return;
+ setLaw(id);requestedArticle=article;
+ handledHash=lawURL(id,article);
+ if(location.hash!==handledHash)history.replaceState(null,'',handledHash);
+ refresh();ensureSelected();
+ if(!article)EL('rp-law-title')?.scrollIntoView({block:'nearest'});
+}
+function prepareRoute(){
+ if(handledHash===location.hash)return;
+ handledHash=location.hash;
+ const params=new URLSearchParams(location.hash.split('?')[1]||'');
+ const law=params.get('law'),article=params.get('article')||'';
+ if(law&&allLaws().some(item=>item.id===law))setLaw(law);
+ requestedArticle=articlePattern.test(article)?article:'';
+}
+function jumpTo(id){
+ const doc=mem.get(s.lawId),target=doc?.articles.find(a=>a.id===id);
+ if(!target){refresh();note('指定された条文が見つかりません。');return;}
+ stopVoice();s.textFilter='';s.onlyMarked=false;s.onlyBookmarked=false;
+ s.articleScope=target.zone==='main'?'main':target.zone==='appendix'?'appendix':'suppl';
+ s.page=Math.floor(shownArticles(doc).findIndex(a=>a.id===id)/s.pageSize)+1;
+ meta.positions[s.lawId]=id;writeMeta();
+ refresh({scroll:false});
+ const node=EL('rp-a-'+id);node?.focus({preventScroll:true});node?.scrollIntoView({block:'start'});
+}
+function shownArticles(doc){
+ if(!doc)return [];
+ const query=fold(s.textFilter),number=articleNumber(query),terms=query.split(/\s+/).filter(Boolean);
+ const marks=s.onlyMarked?new Set(meta.marks.filter(m=>m.lawId===s.lawId).map(m=>m.articleId)):null;
+ const books=s.onlyBookmarked?new Set(meta.bookmarks):null;
+ return doc.articles.filter(a=>{
   if(s.articleScope==='main'&&a.zone!=='main')return false;
-  if(s.articleScope==='suppl'&&a.zone==='main'||s.articleScope==='suppl'&&a.zone==='appendix')return false;
+  if(s.articleScope==='suppl'&&!a.zone.startsWith('suppl-'))return false;
   if(s.articleScope==='appendix'&&a.zone!=='appendix')return false;
-  if(search&&!a.search.includes(search))return false;
-  if(s.onlyMarked&&!meta.marks.some(m=>m.lawId===s.lawId&&m.articleId===a.id))return false;
-  if(s.onlyBookmarked&&!meta.bookmarks.includes(bid(s.lawId,a.id)))return false;
-  return true;
+  if(number&&a.number!==number)return false;
+  if(!number&&terms.length){
+   a.normalizedSearch??=fold(a.search);
+   if(terms.some(term=>!a.normalizedSearch.includes(term)))return false;
+  }
+  return (!marks||marks.has(a.id))&&(!books||books.has(bid(s.lawId,a.id)));
  });
 }
 function markedContent(a,i,txt){
- const marks=meta.marks.filter(m=>m.lawId===s.lawId&&m.articleId===a.id&&m.block===i&&!m.stale&&m.start<txt.length&&m.end>0);
+ const marks=meta.marks.filter(m=>{
+  if(m.lawId!==s.lawId||m.articleId!==a.id||m.block!==i||m.stale||m.end>txt.length)return false;
+  const exact=txt.slice(m.start,m.end);
+  return m.checksum?fingerprint(exact)===m.checksum:!m.excerpt||exact.startsWith(m.excerpt);
+ });
  if(!marks.length)return ESC(txt);
  const boundaries=[0,txt.length,...marks.flatMap(m=>[Math.max(0,Math.min(txt.length,m.start)),Math.max(0,Math.min(txt.length,m.end))])].sort((x,y)=>x-y);
  let html='';for(let k=0;k<boundaries.length-1;k++){
@@ -212,15 +404,15 @@ function markedContent(a,i,txt){
 }
 function articleHTML(a){
  const marked=meta.marks.filter(m=>m.lawId===s.lawId&&m.articleId===a.id),book=meta.bookmarks.includes(bid(s.lawId,a.id));
- const noteText=meta.notes[bid(s.lawId,a.id)]||'';
- return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${ESC(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${ESC(a.caption)}</div>`:''}<h3>${ESC(a.title)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="${book?'ブックマーク解除':'ブックマーク'}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモを開く">✎</button></div></div>
+ const key=bid(s.lawId,a.id),noteText=meta.notes[key]||'',noteOpen=s.noteIds.has(key);
+ return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}" tabindex="-1"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${ESC(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${ESC(a.caption)}</div>`:''}<h3>${ESC(a.title)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="条文のしおり" aria-pressed="${book}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモ" aria-expanded="${noteOpen}">✎</button><button class="rp-mini" data-rp="copy-link" data-id="${ESC(a.id)}" aria-label="${ESC(a.title)}へのリンクをコピー" title="条文リンク">↗</button></div></div>
  <div class="rp-article-body">${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b.t)}</p>`).join('')}</div>
- <div class="rp-article-foot"><span>${marked.length?`<span class="rp-foot-count">${marked.length}件のマーカー</span>`:'文章を選択してマーカー線を保存'}</span>${marked.length?`<button class="rp-link" data-rp="marks-manage" data-id="${ESC(a.id)}">マーカーを管理</button>`:''}</div>
- <div class="rp-notebox ${noteText?'has-note':''}" id="rp-note-${ESC(a.id)}" hidden><label for="rp-note-input-${ESC(a.id)}">✎ ${ESC(a.title)}の学習メモ（自動保存）</label><textarea id="rp-note-input-${ESC(a.id)}" class="rp-textarea" data-rp="note-input" data-id="${ESC(a.id)}" maxlength="4000" placeholder="判例・関連問題・覚え方を記録">${ESC(noteText)}</textarea><small>このメモは学習バックアップに含まれます。</small></div></article>`;
+ <div class="rp-article-foot" ${marked.length?'':'hidden'}><span>${marked.length?`<span class="rp-foot-count">マーカー ${marked.length}件</span>`:''}</span>${marked.length?`<button class="rp-link" data-rp="marks-manage" data-id="${ESC(a.id)}">マーカーを管理</button>`:''}</div>
+ <div class="rp-notebox ${noteText?'has-note':''}" id="rp-note-${ESC(a.id)}" ${noteOpen?'':'hidden'}><label for="rp-note-input-${ESC(a.id)}">✎ ${ESC(a.title)}の学習メモ（自動保存）</label><textarea id="rp-note-input-${ESC(a.id)}" class="rp-textarea" data-rp="note-input" data-id="${ESC(a.id)}" maxlength="4000" placeholder="判例・関連問題・覚え方を記録">${ESC(noteText)}</textarea><small>このメモは学習バックアップに含まれます。</small></div></article>`;
 }
 function catalogHTML(){
- const needle=s.lawFilter.trim().toLowerCase(),list=allLaws().filter(x=>(s.group==='all'||x.group===s.group)&&(!needle||(x.name+x.topic).toLowerCase().includes(needle)));
- return `<aside class="rp-catalog ${s.mobileCatalog?'rp-catalog-open':''}" aria-label="六法・法令一覧"><div class="rp-catalog-top"><div><strong>法令ライブラリ</strong><div class="rp-muted">6基本法＋重要行政法令</div></div><span class="rp-count">${allLaws().length}法令</span></div><input class="rp-input rp-catalog-search" type="search" id="rp-lawfilter" placeholder="法令名を検索" value="${ESC(s.lawFilter)}" aria-label="法令名を検索"><div class="rp-tabs" role="group" aria-label="法令グループ">${[['all','すべて'],['六法','六法'],['行政法令','行政法令'],['追加法令','追加']].map(([x,t])=>`<button class="${s.group===x?'active':''}" data-rp="group" data-val="${x}">${t}</button>`).join('')}</div><div class="rp-lawlist">${list.length?list.map(x=>`<button class="rp-lawitem ${s.lawId===x.id?'selected':''}" data-rp="select" data-id="${x.id}"><span class="rp-lawitem-body"><strong>${ESC(x.name)}</strong><small>${ESC(x.topic||x.group)}</small></span><span class="rp-cache-status ${mem.has(x.id)?'cached':''}" title="${mem.has(x.id)?'本文を保存済み':'未取得'}">${mem.has(x.id)?'保存済':'取得'}</span></button>`).join(''):'<div class="rp-mini-empty">該当する法令がありません。</div>'}</div><div class="rp-catalog-bottom"><button class="rp-button rp-secondary rp-full" data-rp="bulk" ${s.fetchingAll?'disabled':''}>${s.fetchingAll?'取得処理中…':'↓ 六法6法令をまとめて保存'}</button>${s.bulkStatus?`<p class="rp-muted" role="status">${ESC(s.bulkStatus)}</p>`:''}<button class="rp-button rp-ghost rp-full" data-rp="choose-xml">＋ e-Gov法令XMLを取り込む</button><label class="rp-custom-label" for="rp-add-id">ほかの法令を追加（e-Gov法令ID）</label><div class="rp-custom-row"><input id="rp-add-id" class="rp-input" placeholder="例：321CONSTITUTION" maxlength="22" autocapitalize="characters" aria-label="追加する法令ID"><button class="rp-button rp-secondary" data-rp="add-law">追加</button></div><div class="rp-official-panel"><button class="rp-official-toggle" data-rp="toggle-index" aria-expanded="${s.indexOpen}">⌕ e-Govの全法律から名前で探す <span>${s.indexOpen?'−':'＋'}</span></button>${officialSearchHTML()}</div><small>条文本文の初回取得にはネット接続が必要です。取得済みの法令はオフラインでも閲覧できます。</small></div></aside>`;
+ const needle=fold(s.lawFilter),list=allLaws().filter(x=>(s.group==='all'||x.group===s.group)&&(!needle||fold(x.name+' '+x.topic+' '+x.id).includes(needle)));
+ return `<aside class="rp-catalog ${s.mobileCatalog?'rp-catalog-open':''}" aria-label="法令一覧" id="rp-catalog"><div class="rp-catalog-top"><div><strong>法令一覧</strong></div><span class="rp-count">${allLaws().length}法令</span></div><input class="rp-input rp-catalog-search" type="search" id="rp-lawfilter" placeholder="法令名を検索" value="${ESC(s.lawFilter)}" aria-label="法令名を検索"><div class="rp-tabs" role="group" aria-label="法令グループ">${[['all','すべて'],['六法','六法'],['行政法令','行政法令'],['追加法令','追加']].map(([x,t])=>`<button class="${s.group===x?'active':''}" data-rp="group" data-val="${x}">${t}</button>`).join('')}</div><div class="rp-lawlist">${list.length?list.map(x=>`<button class="rp-lawitem ${s.lawId===x.id?'selected':''}" data-rp="select" data-id="${x.id}"><span class="rp-lawitem-body"><strong>${ESC(x.name)}</strong><small>${ESC(x.topic||x.group)}</small></span><span class="rp-cache-status  ${EDITION?.has(x.id)||mem.has(x.id)?'cached':''}" title="法令本文の状態">${EDITION?.has(x.id)?'収録':mem.has(x.id)?'保存済':'要取得'}</span></button>`).join(''):'<div class="rp-mini-empty">該当する法令がありません。</div>'}</div><details id="rp-add-tools" class="rp-catalog-bottom rp-add-tools" ${s.addOpen?'open':''}><summary>法令を追加・更新</summary><button class="rp-button rp-secondary rp-full" data-rp="bulk" ${s.fetchingAll?'disabled':''}>${s.fetchingAll?'取得処理中…':'主要六法の公式本文を再取得'}</button>${s.bulkStatus?`<p class="rp-muted" role="status">${ESC(s.bulkStatus)}</p>`:''}<button class="rp-button rp-ghost rp-full" data-rp="choose-xml">＋ e-Gov法令XMLを取り込む</button><label class="rp-custom-label" for="rp-add-id">ほかの法令を追加（e-Gov法令ID）</label><div class="rp-custom-row"><input id="rp-add-id" class="rp-input" placeholder="例：321CONSTITUTION" maxlength="22" autocapitalize="characters" aria-label="追加する法令ID"><button class="rp-button rp-secondary" data-rp="add-law">追加</button></div><div class="rp-official-panel"><button class="rp-official-toggle" data-rp="toggle-index" aria-expanded="${s.indexOpen}">憲法・法律の公式目録から探す <span>${s.indexOpen?'−':'＋'}</span></button>${officialSearchHTML()}</div><small>追加法令の本文は、公式取得またはXML取込で開けます。</small></details></aside>`;
 }
 function readerHTML(){
  const doc=mem.get(s.lawId),info=selectedInfo(),available=Boolean(doc);
@@ -228,32 +420,93 @@ function readerHTML(){
  const counts=available?shownArticles(doc):[],pages=Math.max(1,Math.ceil(counts.length/s.pageSize)),pg=Math.min(Math.max(1,s.page),pages);s.page=pg;
  const shown=counts.slice((pg-1)*s.pageSize,pg*s.pageSize);
  const markCount=meta.marks.filter(x=>x.lawId===s.lawId).length;
- return `<section class="rp-reader" aria-label="六法条文閲覧"><div class="rp-reader-head"><div><div class="rp-eyebrow">LEGAL TEXT / e-Gov OFFICIAL</div><h2>${ESC(doc?.name||info.name)}</h2>${doc?.number?`<p class="rp-muted">${ESC(doc.number)}</p>`:''}</div><div class="rp-source-actions"><a class="rp-button rp-ghost" href="${official}" target="_blank" rel="noopener noreferrer">公式原文 ↗</a><button class="rp-button rp-secondary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>${s.loading?'取得中…':available?'↻ 最新データを取得':'↓ 条文を取得'}</button></div></div>
- <div class="rp-statusrow"><span class="rp-status-pill ${available?'ready':''}">${available?'✓ 本文保存済み':'本文未取得'}</span>${available?`<span>${NF(doc.count)}件の表示項目</span><span>取得：${timeText(doc.fetchedAt)}</span>`:'<span>未取得の法令は本文を表示しません</span>'}<span>${markCount}マーカー</span></div>
- ${s.error?`<div class="rp-alert error" role="alert">${ESC(s.error)}<div class="rp-actions"><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button><a href="${official}" target="_blank" rel="noopener noreferrer">e-Gov原文を開く ↗</a></div></div>`:''}
- ${!available?`<div class="rp-blank"><div class="rp-blank-icon">六</div><h3>${ESC(info.name)}の条文を読み込む</h3><p>公式e-Gov法令APIから現在提供されている法令本文を取得し、この端末に保存します。保存後はオフラインでも閲覧・検索・読み上げ・マーカーの利用ができます。</p><div class="rp-actions center"><button class="rp-button rp-primary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>${s.loading?'読み込み中…':'公式条文を取得して保存'}</button><button class="rp-button rp-secondary" data-rp="choose-xml">保存したXMLを取り込む</button></div><div class="rp-mini-note">※ このアプリに法令全文が初期同梱されているわけではありません。ネット接続による取得が必要です。内容は取得日時点のデータで、適用する施行日や最新の改正状況を自動検証しません。</div></div>`:
- `<div class="rp-readtools"><div class="rp-field"><label for="rp-textsearch">本文を検索</label><input class="rp-input" type="search" id="rp-textsearch" value="${ESC(s.textFilter)}" placeholder="例：取消し、第三条、債権"></div><div class="rp-field rp-scope"><label for="rp-scope">表示範囲</label><select class="rp-input" id="rp-scope" data-rp="scope"><option value="main" ${s.articleScope==='main'?'selected':''}>本則・前文</option><option value="suppl" ${s.articleScope==='suppl'?'selected':''}>附則</option><option value="appendix" ${s.articleScope==='appendix'?'selected':''}>別表・別記</option><option value="all" ${s.articleScope==='all'?'selected':''}>すべて</option></select></div></div>
- <div class="rp-filter-row"><button class="rp-filter ${s.onlyBookmarked?'active':''}" data-rp="only-book">★ ブックマークのみ</button><button class="rp-filter ${s.onlyMarked?'active':''}" data-rp="only-mark">◉ マーカーのみ</button><span class="rp-results">${NF(counts.length)}件該当 · ${pg}/${pages}ページ</span></div>
- <div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文の文章を指・マウスで選択 → 色を押す</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button></div>
- <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page">▶ このページを読む</button><button class="rp-button rp-ghost" data-rp="pause" id="rp-voice-pause">一時停止</button><button class="rp-button rp-ghost" data-rp="stop">■ 停止</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">停止中</span></div>
+ return `<section class="rp-reader" aria-label="六法条文閲覧"><div class="rp-reader-head"><div><div class="rp-eyebrow">${ESC(info.group==='行政法令'?'試験関連法令':info.group)}</div><h2 id="rp-law-title" tabindex="-1">${ESC(doc?.name||info.name)}</h2>${doc?.number?`<p class="rp-muted">${ESC(doc.number)}</p>`:''}</div><div class="rp-source-actions"><a class="rp-button rp-ghost" href="${official}" target="_blank" rel="noopener noreferrer">公式原文 ↗</a><button class="rp-button rp-secondary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>${s.loading?'取得中…':available?'公式本文を再取得':'↓ 条文を取得'}</button></div></div>
+ <div class="rp-statusrow"><span class="rp-status-pill ${available?'ready':''}">${doc?(doc.bundled?'収録本文':doc.imported?'取込本文':'取得本文'):s.readingPack?'収録本文を準備中':'本文未取得'}</span>${available?`<span>${NF(doc.count)}件の表示項目</span><span>${doc.bundled?'収録':doc.imported?'取込':'取得'} ${timeText(doc.fetchedAt)}（日本時間）</span>`:''}<span>${markCount}マーカー</span></div>
+ ${s.error||s.packError?`<div class="rp-alert error" role="alert">${ESC(s.error||s.packError)}<div class="rp-actions"><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button><a href="${official}" target="_blank" rel="noopener noreferrer">e-Gov原文を開く ↗</a></div></div>`:''}
+  ${!available?`<div class="rp-blank"><h3>${s.readingPack?'収録本文を読み込み中':ESC(info.name)+'の本文を開く'}</h3>
+ ${s.readingPack?'':`<p>公式e-Govの本文を取得するか、法令XMLを取り込んで閲覧できます。</p><div class="rp-actions center"><button class="rp-button rp-primary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>公式本文を取得する</button><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button></div>`}</div>`:
+ `<div class="rp-readtools"><div class="rp-field"><label for="rp-textsearch">条番号・語句</label><input class="rp-input" type="search" id="rp-textsearch" value="${ESC(s.textFilter)}" placeholder="例：95、第一条、取消し"></div><div class="rp-field rp-scope"><label for="rp-scope">表示範囲</label><select class="rp-input" id="rp-scope" data-rp="scope"><option value="main" ${s.articleScope==='main'?'selected':''}>本則・前文</option><option value="suppl" ${s.articleScope==='suppl'?'selected':''}>附則</option><option value="appendix" ${s.articleScope==='appendix'?'selected':''}>別表・別記</option><option value="all" ${s.articleScope==='all'?'selected':''}>すべて</option></select></div></div>
+ ${tocHTML(doc)}<div class="rp-filter-row"><button class="rp-filter ${s.onlyBookmarked?'active':''}" data-rp="only-book">しおり</button><button class="rp-filter ${s.onlyMarked?'active':''}" data-rp="only-mark">マーカー</button><span class="rp-results" role="status">${NF(counts.length)}件該当 · ${pg}/${pages}ページ</span></div>
+ <details class="rp-reader-controls" id="rp-reader-controls" ${s.controlsOpen?'open':''}><summary>読み上げ設定・マーカー</summary><div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文をドラッグ、または長押しして色を選びます。</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button><label for="rp-voice" class="rp-muted">日本語音声</label><select id="rp-voice" class="rp-input rp-voice-select">${voicesHTML()}</select></div></details>
+ <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page" ${counts.length?'':'disabled'}>▷ 表示中の条文を読む</button><button class="rp-button rp-ghost" data-rp="pause" id="rp-voice-pause" ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button><button class="rp-button rp-ghost" data-rp="stop" id="rp-voice-stop" ${speaking?'':'disabled'}>停止</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">${ESC(voiceStatus)}</span></div>
  <div class="rp-read-meta"><p>本文：${ESC(doc.source)}。条文は学習用に整形して表示します。公式の脚注・図表等は原文で確認してください。</p></div>
  <div class="rp-articles" id="rp-articles">${shown.length?shown.map(articleHTML).join(''):'<div class="rp-empty">一致する条文がありません。検索条件・本則／附則の切替をご確認ください。</div>'}</div>
  ${pages>1?`<nav class="rp-pagination" aria-label="条文ページ"><button class="rp-button rp-secondary" data-rp="page" data-page="${pg-1}" ${pg===1?'disabled':''}>← 前へ</button><span>${pg} / ${pages} ページ</span><button class="rp-button rp-secondary" data-rp="page" data-page="${pg+1}" ${pg===pages?'disabled':''}>次へ →</button></nav>`:''}
- <div class="rp-reader-bottom"><button class="rp-button rp-ghost" data-rp="delete-law">この法令の保存本文を削除</button><a href="${official}" target="_blank" rel="noopener noreferrer">この法令の最新状況をe-Govで確認 ↗</a></div>`}
+ <div class="rp-reader-bottom">${doc.bundled?'':'<button class="rp-button rp-ghost" data-rp="delete-law">取得済み本文を削除</button>'}<a href="${official}" target="_blank" rel="noopener noreferrer">この法令の最新状況をe-Govで確認 ↗</a></div>`}
  <input id="rp-import" type="file" accept=".xml,text/xml,application/xml" hidden>
  </section>`;
 }
-function renderHTML(){const cached=[...mem.keys()].length;return `<div class="rp-page"><div class="rp-page-banner"><div><div class="rp-eyebrow">FOLIO 05 / LAW SHELF & ANNOTATIONS</div><h1>六法書架と朱引きの間</h1><p>日本国憲法・民法・刑法・商法・民事訴訟法・刑事訴訟法と、行政書士試験の重要法令。条文検索、音声読み上げ、カラーのマーカー線、ブックマーク、学習メモをまとめて利用できます。</p></div><div class="rp-banner-symbol">六</div></div><div class="rp-banner-bottom"><span>六法6法令＋行政法令9法令</span><span>本文保存 ${NF(cached)}法令</span><span>マーカー ${NF(meta.marks.length)}件</span><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">公式 e-Gov ↗</a></div><button class="rp-mobile-catalog-button" data-rp="toggle-catalog" aria-expanded="${s.mobileCatalog}">☰ ${s.mobileCatalog?'法令一覧を閉じる':'法令一覧を開く・切り替える'} <span>${ESC(selectedInfo().name)}</span></button><div class="rp-workspace">${catalogHTML()}${readerHTML()}</div><div class="rp-disclaimer"><strong>法令のご利用にあたって</strong>：本文はe-Govから閲覧時に取得・端末に保存します。取得日時が最新改正の施行日を示すものではありません。法令の規定には未施行・改正予定・経過措置・別表・図の影響があり得ます。試験学習や実務で引用する前に、必ず<a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">公式e-Gov法令検索</a>の原文と施行時点を確認してください。音声合成は端末搭載の音声エンジンを使用します。</div></div>`;}
-function refresh({keepFocus=false,scroll=true}={}){
- const c=EL('content');if(!c||location.hash!=='#roppo')return;
- let id=null,pos=null;if(keepFocus&&document.activeElement?.id){id=document.activeElement.id;pos=typeof document.activeElement.selectionStart==='number'?document.activeElement.selectionStart:null;}
- const y=scroll?window.scrollY:null;c.innerHTML=renderHTML();if(id&&EL(id)){const e=EL(id);e.focus({preventScroll:true});if(pos!==null&&e.setSelectionRange)try{e.setSelectionRange(pos,pos);}catch{}}
- if(y!==null)window.scrollTo(0,y);
+function tocHTML(doc){
+ const headings=new Map();
+ for(const article of doc.articles)if(article.zone==='main'&&article.heading&&!headings.has(article.heading))headings.set(article.heading,article.id);
+ const last=meta.positions[doc.id];
+ if(headings.size<2&&!last)return '';
+ return `<div class="rp-navigation-row">${headings.size>1?`<select class="rp-input" id="rp-toc" aria-label="目次から移動"><option value="">目次から移動</option>${[...headings].map(([title,id])=>`<option value="${ESC(id)}">${ESC(title)}</option>`).join('')}</select>`:''}${last?`<button class="rp-button rp-ghost" data-rp="jump" data-id="${ESC(last)}">読んだ位置へ</button>`:''}</div>`;
 }
-function display(){requestAnimationFrame(()=>{ensureSelected();});return renderHTML();}
+function savedHTML(){
+ const items=new Map();
+ const get=key=>{
+  if(!items.has(key))items.set(key,{book:false,marks:0,note:''});
+  return items.get(key);
+ };
+ meta.bookmarks.forEach(key=>{get(key).book=true;});
+ meta.marks.forEach(mark=>{get(bid(mark.lawId,mark.articleId)).marks++;});
+ for(const [key,text] of Object.entries(meta.notes))if(text.trim())get(key).note=text.trim();
+ const laws=new Map(allLaws().map(info=>[info.id,info.name]));
+ const entries=[...items].filter(([key])=>{const [law,article]=key.split('::');return laws.has(law)&&articlePattern.test(article);}).reverse();
+ if(!entries.length)return '';
+ const size=15,pages=Math.ceil(entries.length/size),page=Math.min(s.savedPage,pages);
+ s.savedPage=page;
+ return `<section class="rp-saved"><button data-rp="toggle-saved" aria-expanded="${s.savedOpen}" aria-controls="rp-saved-list">しおり・朱引き・メモ <small>${entries.length}条文</small></button><div class="rp-saved-list" id="rp-saved-list" ${s.savedOpen?'':'hidden'}>${s.savedOpen?entries.slice((page-1)*size,page*size).map(([key,item])=>{
+  const [law,article]=key.split('::');
+  const title=mem.get(law)?.articles.find(a=>a.id===article)?.title||articleLabel(article);
+  const labels=[item.book?'しおり':'',item.marks?'マーカー'+item.marks+'件':'',item.note?'メモ '+item.note.slice(0,60):''].filter(Boolean).join(' ／ ');
+  return `<button data-rp="open-saved" data-id="${law}" data-val="${article}"><strong>${ESC(laws.get(law))} ${ESC(title)}</strong><small>${ESC(labels)}</small></button>`;
+ }).join(''):''}${s.savedOpen&&pages>1?`<div class="rp-pagination"><button data-rp="saved-page" data-page="${page-1}" ${page===1?'disabled':''}>前へ</button><span>${page}/${pages}</span><button data-rp="saved-page" data-page="${page+1}" ${page===pages?'disabled':''}>次へ</button></div>`:''}</div></section>`;
+}
+function selectionMenu(){
+ return `<div class="rp-selection-tray" id="rp-selection-tray" role="group" aria-label="選択範囲のマーカーと読み上げ" hidden>
+ <div class="rp-selection-tray-header"><strong>選択箇所にマーカー</strong><button class="rp-mini" data-rp="clear-selection" aria-label="選択を解除">×</button></div>
+ <div class="rp-color-row">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([color,label])=>`<button class="rp-paint rp-paint-${color}" data-rp="mark" data-color="${color}" aria-label="${label}色で選択範囲をマーク"><span aria-hidden="true"></span>${label}</button>`).join('')}</div>
+ <button class="rp-button rp-ghost" data-rp="speak-selection">▷ 選んだ文章を読む</button></div>`;
+}
+function renderHTML(){
+ return `<div class="rp-page"><div class="rp-page-banner"><div><h1>六法書架と朱引き</h1><p>主要六法と試験関連の15法令を収録。条文を読み、気になる箇所に色やメモを残せます。</p></div><div class="rp-banner-symbol" aria-hidden="true">六</div></div>
+ <div class="rp-banner-bottom"><span>主要六法・試験関連法令 15本</span><a href="https://laws.e-gov.go.jp/" target="_blank" rel="noopener noreferrer">e-Gov法令検索 ↗</a></div>
+ ${savedHTML()}
+ <button class="rp-mobile-catalog-button" data-rp="toggle-catalog" aria-controls="rp-catalog" aria-expanded="${s.mobileCatalog}">${s.mobileCatalog?'法令一覧を閉じる':'法令を切り替える'} <span>${ESC(selectedInfo().name)}</span></button>
+ <div class="rp-workspace">${catalogHTML()}${readerHTML()}</div>
+ <div class="rp-disclaimer"><strong>法令データの出典</strong>　<a href="https://laws.e-gov.go.jp/docs/law-data-basic/8529371-law-api-v1/" target="_blank" rel="noopener noreferrer">e-Gov法令検索・法令API Version1 ↗</a><br>閲覧用に整形しています。改正の施行日、図表・様式・脚注や、試験基準日に適用される条文は、公式原文で確認してください。</div>
+ ${selectionMenu()}</div>`;
+}
+function refresh({keepFocus=false,scroll=true}={}){
+ const content=EL('content');if(!content||!readerRoute())return;
+ const focus=keepFocus?document.activeElement:null,id=focus?.id;
+ const caret=typeof focus?.selectionStart==='number'?[focus.selectionStart,focus.selectionEnd]:null;
+ const y=window.scrollY,catalogScroll=EL('rp-catalog')?.scrollTop,listScroll=content.querySelector('.rp-lawlist')?.scrollTop;
+ clearSelection();
+ content.innerHTML=renderHTML();
+ if(catalogScroll)EL('rp-catalog').scrollTop=catalogScroll;
+ if(listScroll)content.querySelector('.rp-lawlist').scrollTop=listScroll;
+ if(id&&EL(id)){
+  const el=EL(id);el.focus({preventScroll:true});
+  if(caret&&el.setSelectionRange)try{el.setSelectionRange(...caret);}catch{}
+ }
+ if(scroll)window.scrollTo(0,y);
+ if(activeSpeechArticle)EL('rp-a-'+activeSpeechArticle)?.classList.add('rp-reading-now');
+}
+function display(){
+ prepareRoute();s.readingPack=!mem.has(s.lawId)&&Boolean(EDITION?.has(s.lawId));
+ requestAnimationFrame(ensureSelected);return renderHTML();
+}
+function clearSelection(removeRange=false){
+ s.selection=[];s.selectedText='';
+ const tray=EL('rp-selection-tray');if(tray)tray.hidden=true;
+ if(removeRange)window.getSelection()?.removeAllRanges();
+}
 function selectionCapture(){
  const sel=window.getSelection?.();if(!sel||sel.isCollapsed||!sel.rangeCount)return;
- const r=sel.getRangeAt(0),root=EL('rp-articles');if(!root||!root.contains(r.commonAncestorContainer))return;
+ const r=sel.getRangeAt(0),root=EL('rp-articles');if(!root||!root.contains(r.commonAncestorContainer)){clearSelection();return;}
  const result=[];for(const node of root.querySelectorAll('.rp-paragraph')){
   if(!r.intersectsNode(node))continue;
   let begin=0,end=node.textContent.length;
@@ -262,38 +515,64 @@ function selectionCapture(){
   if(end>begin)result.push({articleId:node.dataset.artid,block:Number(node.dataset.rpblock),start:begin,end,excerpt:node.textContent.slice(begin,end)});
   if(result.length>80)break;
  }
- if(result.length){s.selection=result;s.selectedText=result.map(x=>x.excerpt).join(' ').slice(0,6000);}
+ if(result.length){
+  s.selection=result;s.selectedText=result.map(x=>x.excerpt).join(' ').slice(0,12000);
+  const tray=EL('rp-selection-tray');if(tray)tray.hidden=false;
+ }else clearSelection();
 }
 function markSelected(color){selectionCapture();if(!s.selection.length){note('先に条文の文章をドラッグ・長押しして選択してください。');return;}
  if(!COLORS.includes(color))return;
  const source=mem.get(s.lawId);if(!source)return;let n=0;
- for(const k of s.selection){const a=source.articles.find(a=>a.id===k.articleId),b=a?.blocks[k.block];if(!b||k.end>b.t.length||k.start<0||k.end<=k.start)continue;
-  meta.marks.push({id:'m'+Date.now()+'-'+Math.random().toString(36).slice(2,9),lawId:s.lawId,articleId:k.articleId,block:k.block,start:k.start,end:k.end,color,at:Date.now(),excerpt:k.excerpt.slice(0,160)});n++;
+ for(const k of s.selection){
+  const block=source.articles.find(a=>a.id===k.articleId)?.blocks[k.block];
+  if(!block||block.t.slice(k.start,k.end)!==k.excerpt)continue;
+  for(let start=k.start;start<k.end;start+=10000){
+   const end=Math.min(k.end,start+10000),exact=block.t.slice(start,end);
+   meta.marks.push({id:'m'+Date.now()+'-'+Math.random().toString(36).slice(2,10),lawId:s.lawId,articleId:k.articleId,
+    block:k.block,start,end,color,at:Date.now(),excerpt:exact.slice(0,160),checksum:fingerprint(exact)});
+   n++;
+  }
  }
  if(meta.marks.length>15000)meta.marks=meta.marks.slice(-15000);
- if(n){writeMeta();s.selection=[];s.selectedText='';window.getSelection()?.removeAllRanges();refresh();note(n+'か所にマーカー線を保存しました。');}else note('選択範囲を条文に結び付けられませんでした。');
+ if(n){const saved=writeMeta();clearSelection(true);refresh();if(saved)note('マーカーを保存しました。');}
+ else note('選択範囲を条文に結び付けられませんでした。');
 }
 function getArticle(id){return mem.get(s.lawId)?.articles.find(x=>x.id===id);}
 function speaker(){return typeof window.speechSynthesis!=='undefined'&&typeof window.SpeechSynthesisUtterance!=='undefined';}
-let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0;
-function voiceState(t){const e=EL('rp-tts-state');if(e)e.textContent=t;const p=EL('rp-voice-pause');if(p)p.textContent=paused?'▶ 再開':'一時停止';}
-function stopVoice(){speakTokens++;segments=[];segIndex=0;speaking=false;paused=false;try{window.speechSynthesis?.cancel();}catch(e){}voiceState('停止中');}
+let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0,utterance=null,voiceStatus='停止中',activeSpeechArticle='';
+function voicesHTML(){
+ const voices=(window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
+ return '<option value="">端末の既定音声</option>'+voices.map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
+}
+function indicateSpeech(id){
+ if(activeSpeechArticle)EL('rp-a-'+activeSpeechArticle)?.classList.remove('rp-reading-now');
+ activeSpeechArticle=id;
+ if(id)EL('rp-a-'+id)?.classList.add('rp-reading-now');
+}
+function voiceState(t){
+ voiceStatus=t;
+ const label=EL('rp-tts-state'),pause=EL('rp-voice-pause'),stop=EL('rp-voice-stop');
+ if(label)label.textContent=t;
+ if(pause){pause.disabled=!speaking;pause.textContent=paused?'再開':'一時停止';}
+ if(stop)stop.disabled=!speaking;
+}
+function stopVoice(){speakTokens++;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;indicateSpeech('');try{window.speechSynthesis?.cancel();}catch(e){}voiceState('停止中');}
 function splitSpeech(str){const parts=String(str).replace(/\s+/g,' ').match(/[^。！？!？\n]+[。！？!？]?/g)||[str],chunks=[];
  for(const part of parts){let cur=part;while(cur.length>150){let cut=cur.lastIndexOf('、',150);if(cut<65)cut=150;else cut++;chunks.push(cur.slice(0,cut));cur=cur.slice(cut);}if(cur.trim())chunks.push(cur.trim());}
  return chunks.slice(0,1500);
 }
 function getVoice(){const voices=window.speechSynthesis?.getVoices?.()||[];return voices.find(x=>x.lang?.toLowerCase().startsWith('ja')&&(x.voiceURI===meta.voice))||voices.find(x=>x.lang?.toLowerCase().startsWith('ja'))||null;}
-function speakNext(token){if(token!==speakTokens)return;if(segIndex>=segments.length){speaking=false;paused=false;voiceState('読み上げ完了');return;}
- const text=segments[segIndex++],utter=new SpeechSynthesisUtterance(text);utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;const voice=getVoice();if(voice)utter.voice=voice;
- utter.onend=()=>{if(token===speakTokens)requestAnimationFrame(()=>speakNext(token));};utter.onerror=(event)=>{if(token!==speakTokens)return;if(event.error==='canceled'||event.error==='interrupted')return;speaking=false;voiceState('読み上げを終了しました');};
+function speakNext(token){if(token!==speakTokens||paused||utterance)return;if(segIndex>=segments.length){speaking=false;paused=false;indicateSpeech('');voiceState('読み上げ完了');return;}
+ const segment=segments[segIndex++],utter=new SpeechSynthesisUtterance(segment.text);utterance=utter;indicateSpeech(segment.id);utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;const voice=getVoice();if(voice)utter.voice=voice;
+ utter.onend=()=>{if(token===speakTokens){utterance=null;requestAnimationFrame(()=>speakNext(token));}};utter.onerror=(event)=>{if(token!==speakTokens)return;stopVoice();voiceState('端末の日本語音声をご確認ください');};
  voiceState(`読み上げ中 ${segIndex}/${segments.length}`);try{window.speechSynthesis.speak(utter);}catch(e){stopVoice();note('この端末では読み上げを開始できません。','bad');}
 }
-function startSpeech(text){stopVoice();if(!speaker()){note('このブラウザは音声読み上げに対応していません。OSとブラウザの音声機能をご確認ください。','bad');return;}
- if(!text.trim()){note('読み上げる文章がありません。');return;}
- segments=splitSpeech(text);if(!segments.length)return;speaking=true;paused=false;const token=speakTokens;speakNext(token);
+function startSpeech(items){stopVoice();if(!speaker()){note('このブラウザは音声読み上げに対応していません。OSとブラウザの音声機能をご確認ください。','bad');return;}
+ segments=items.flatMap(item=>splitSpeech(item.text).map(text=>({id:item.id,text})));
+ if(!segments.length){note('読み上げる文章を選択してください。');return;}speaking=true;paused=false;const token=speakTokens;speakNext(token);
 }
-function speechPage(){const d=mem.get(s.lawId);if(!d)return;const shown=shownArticles(d).slice((s.page-1)*s.pageSize,s.page*s.pageSize);startSpeech(shown.map(a=>`${a.heading}。${a.title}。${a.caption}。`+a.blocks.map(b=>b.t).join('。')).join('。'));}
-function togglePause(){if(!speaker()||!speaking){note('先に読み上げを開始してください。');return;}try{if(paused){window.speechSynthesis.resume();paused=false;}else{window.speechSynthesis.pause();paused=true;}voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);}catch(e){note('一時停止に失敗しました。');}}
+function speechPage(){const d=mem.get(s.lawId);if(!d)return;const shown=shownArticles(d).slice((s.page-1)*s.pageSize,s.page*s.pageSize);startSpeech(shown.map(a=>({id:a.id,text:[a.title,a.caption,...a.blocks.map(b=>b.t)].filter(Boolean).join('。')})));}
+function togglePause(){if(!speaker()||!speaking){note('先に読み上げを開始してください。');return;}try{if(paused){window.speechSynthesis.resume();paused=false;if(!utterance)speakNext(speakTokens);}else{window.speechSynthesis.pause();paused=true;}voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);}catch(e){note('一時停止に失敗しました。');}}
 function manageMarks(articleId){
  const list=meta.marks.filter(x=>x.lawId===s.lawId&&x.articleId===articleId);
  if(!list.length){note('この条文にはマーカーがありません。');return;}
@@ -321,6 +600,17 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='toggle-catalog'){s.mobileCatalog=!s.mobileCatalog;refresh();return;}
  if(op==='group'){s.group=v;refresh({keepFocus:true});return;}
  if(op==='select'){onSelect(id);return;}
+ if(op==='jump'){jumpTo(id);return;}
+ if(op==='clear-selection'){clearSelection(true);return;}
+ if(op==='toggle-saved'){s.savedOpen=!s.savedOpen;refresh();return;}
+ if(op==='saved-page'){s.savedPage=Number(el.dataset.page)||1;refresh();return;}
+ if(op==='open-saved'){onSelect(id,v);return;}
+ if(op==='copy-link'){
+  const href=new URL(lawURL(s.lawId,id),location.href).href;
+  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(href).then(()=>note('条文リンクをコピーしました。')).catch(()=>window.prompt('条文のリンク',href));
+  else window.prompt('条文のリンク',href);
+  return;
+ }
  if(op==='toggle-index'){s.indexOpen=!s.indexOpen;refresh();if(s.indexOpen&&officialIndex===null)loadOfficialIndex(false);return;}
  if(op==='load-index'){loadOfficialIndex(true);return;}
  if(op==='add-index'){if(!/^[0-9A-Z]{10,22}$/.test(id))return;if(!allLaws().some(x=>x.id===id)){meta.custom.push({id,name:(el.dataset.name||id).slice(0,80),group:'追加法令',topic:'公式法令一覧'});writeMeta();}s.group='all';onSelect(id);note('法令を追加しました。条文を取得すると閲覧できます。');return;}
@@ -328,46 +618,79 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='fetch'){fetchCurrent(true);return;}
  if(op==='bulk'){fetchSix();return;}
  if(op==='choose-xml'){EL('rp-import')?.click();return;}
- if(op==='page'){s.page=Number(el.dataset.page)||1;refresh({scroll:false});EL('rp-articles')?.scrollIntoView({behavior:'instant',block:'start'});return;}
+ if(op==='page'){stopVoice();s.page=Number(el.dataset.page)||1;const first=shownArticles(mem.get(s.lawId))[(s.page-1)*s.pageSize];if(first){meta.positions[s.lawId]=first.id;writeMeta();}refresh({scroll:false});EL('rp-articles')?.scrollIntoView({behavior:'instant',block:'start'});return;}
  if(op==='only-mark'){s.onlyMarked=!s.onlyMarked;s.page=1;refresh();return;}
  if(op==='only-book'){s.onlyBookmarked=!s.onlyBookmarked;s.page=1;refresh();return;}
  if(op==='mark'){markSelected(el.dataset.color);return;}
  if(op==='bookmark'){const key=bid(s.lawId,id),at=meta.bookmarks.indexOf(key);if(at<0)meta.bookmarks.push(key);else meta.bookmarks.splice(at,1);writeMeta();refresh();note(at<0?'条文をブックマークしました。':'ブックマークを外しました。');return;}
- if(op==='note-toggle'){const box=EL('rp-note-'+id);if(box){box.hidden=!box.hidden;if(!box.hidden)box.querySelector('textarea')?.focus();}return;}
+ if(op==='note-toggle'){
+  const box=EL('rp-note-'+id),key=bid(s.lawId,id);
+  if(box){
+   box.hidden=!box.hidden;el.setAttribute('aria-expanded',String(!box.hidden));
+   if(box.hidden){s.noteIds.delete(key);refresh();}
+   else{s.noteIds.add(key);box.querySelector('textarea')?.focus();}
+  }
+  return;
+ }
  if(op==='marks-manage'){manageMarks(id);return;}
  if(op==='close-manager'){EL('rp-mark-manager')?.remove();return;}
  if(op==='delete-mark'){meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
- if(op==='speak-article'){const a=getArticle(id);if(a)startSpeech([a.title,a.caption,...a.blocks.map(b=>b.t)].filter(Boolean).join('。'));return;}
- if(op==='speak-selection'){selectionCapture();startSpeech(s.selectedText||window.getSelection?.()?.toString()||'');return;}
+ if(op==='speak-article'){const a=getArticle(id);if(a)startSpeech([{id:a.id,text:[a.title,a.caption,...a.blocks.map(b=>b.t)].filter(Boolean).join('。')}]);return;}
+ if(op==='speak-selection'){selectionCapture();startSpeech([{id:s.selection[0]?.articleId||'',text:s.selectedText}]);return;}
  if(op==='speak-page'){speechPage();return;}
  if(op==='pause'){togglePause();return;}
  if(op==='stop'){stopVoice();return;}
  if(op==='delete-law'){if(!confirm(`${selectedInfo().name}の保存済み本文を端末から削除しますか？\nマーカー・メモ・ブックマークは残ります。`))return;const lawId=s.lawId;mem.delete(lawId);storeDelete(lawId).then(()=>{refresh();note('本文データを削除しました。');}).catch(()=>note('保存済み本文を削除できませんでした。','bad'));refresh();return;}
 }
-function handlerInput(ev){const el=ev.target;if(location.hash!=='#roppo')return;
- if(el.id==='rp-textsearch'){s.textFilter=el.value.slice(0,150);s.page=1;refresh({keepFocus:true});}
- if(el.id==='rp-lawfilter'){s.lawFilter=el.value.slice(0,150);refresh({keepFocus:true});}
- if(el.id==='rp-index-search'){s.indexSearch=el.value.slice(0,120);refresh({keepFocus:true});}
+function handlerInput(ev){const el=ev.target;if(!readerRoute())return;
+ if(!ev.isComposing&&el.id==='rp-textsearch'&&s.textFilter!==el.value.slice(0,150)){s.textFilter=el.value.slice(0,150);s.page=1;stopVoice();refresh({keepFocus:true});}
+ if(!ev.isComposing&&el.id==='rp-lawfilter'&&s.lawFilter!==el.value.slice(0,150)){s.lawFilter=el.value.slice(0,150);refresh({keepFocus:true});}
+ if(!ev.isComposing&&el.id==='rp-index-search'&&s.indexSearch!==el.value.slice(0,120)){s.indexSearch=el.value.slice(0,120);refresh({keepFocus:true});}
  if(el.dataset.rp==='note-input'){
-  meta.notes[bid(s.lawId,el.dataset.id)]=el.value.slice(0,4000);writeMeta();
+  const key=bid(s.lawId,el.dataset.id);if(el.value.trim())meta.notes[key]=el.value.slice(0,4000);else delete meta.notes[key];writeMeta();
  }
 }
-function handlerChange(ev){const el=ev.target;if(location.hash!=='#roppo')return;
- if(el.id==='rp-scope'){s.articleScope=el.value;s.page=1;refresh();}
+function handlerChange(ev){const el=ev.target;if(!readerRoute())return;
+ if(el.id==='rp-scope'){stopVoice();s.articleScope=el.value;s.page=1;refresh({keepFocus:true});}
+ if(el.id==='rp-toc'&&el.value)jumpTo(el.value);
+ if(el.id==='rp-voice'){meta.voice=el.value;writeMeta();}
  if(el.id==='rp-rate'){meta.rate=Number(el.value)||1;writeMeta();note('次の読み上げから速度を変更します。');}
  if(el.id==='rp-import'){const f=el.files?.[0];if(f)importXml(f);el.value='';}
 }
 let bound=false;
 function bind(){if(bound)return;bound=true;document.addEventListener('click',handlerClick);document.addEventListener('input',handlerInput);document.addEventListener('change',handlerChange);
- document.addEventListener('selectionchange',()=>{if(location.hash==='#roppo')selectionCapture();});
- document.addEventListener('keydown',e=>{if(e.key==='Escape'){EL('rp-mark-manager')?.remove();}});
+ document.addEventListener('compositionend',handlerInput);
+ document.addEventListener('toggle',event=>{
+  if(event.target.id==='rp-reader-controls')s.controlsOpen=event.target.open;
+  if(event.target.id==='rp-add-tools')s.addOpen=event.target.open;
+ },true);
+ document.addEventListener('pointerdown',event=>{
+  if(!readerRoute()||!s.selection.length)return;
+  if(event.target.closest('[data-rp="mark"],[data-rp="speak-selection"],#rp-selection-tray')){
+   if(event.pointerType==='mouse')event.preventDefault();
+  }else if(!event.target.closest('.rp-paragraph'))clearSelection();
+ });
+ window.speechSynthesis?.addEventListener?.('voiceschanged',()=>{const select=EL('rp-voice');if(select)select.innerHTML=voicesHTML();});
+ document.addEventListener('selectionchange',()=>{if(readerRoute())selectionCapture();});
+ document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){EL('rp-mark-manager')?.remove();if(s.selection.length)clearSelection(true);}
+  if(e.key==='Enter'&&!e.isComposing&&e.target.id==='rp-textsearch'){
+   const shown=shownArticles(mem.get(s.lawId));if(shown.length===1){e.preventDefault();jumpTo(shown[0].id);}
+  }
+ });
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopVoice();});
  window.addEventListener('pagehide',stopVoice);
- window.addEventListener('hashchange',()=>{if(location.hash!=='#roppo')stopVoice();});
+ window.addEventListener('hashchange',()=>{if(!readerRoute()){stopVoice();EL('rp-mark-manager')?.remove();}});
 }
 function exportMeta(){return JSON.parse(JSON.stringify(meta));}
-function importMeta(data){meta=cleanMeta(data);writeMeta();refresh();}
-function resetMeta(){meta=fresh();writeMeta();stopVoice();refresh();}
-window.GYOSHI_ROPPO={render:display,bind,stop:stopVoice,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
+function importMeta(data){
+ if(!data||typeof data!=='object'||Array.isArray(data))return false;
+ const previous=meta;meta=cleanMeta(data);
+ if(!writeMeta()){meta=previous;return false;}
+ s.lawId=allLaws().some(item=>item.id===meta.lastLaw)?meta.lastLaw:CATALOG[0][0];
+ handledHash=null;refresh();return true;
+}
+function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopVoice();refresh();}
+window.GYOSHI_ROPPO={render:display,bind,stop:()=>{stopVoice();EL('rp-mark-manager')?.remove();},references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
 bind();
 })();

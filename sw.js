@@ -1,17 +1,43 @@
-/* オフライン動作。キャッシュはこの版のアプリに限定します。 */
-const CACHE='gyosei-master-shubiki-20261112-design-r1';
-const APP=['./','./index.html','./style.css','./roppo.css','./atelier.css','./roppo.js','./app.js','./questions.js','./advanced_questions.js','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
-self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(APP)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',event=>event.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('gyosei-master-')&&k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
+/* Offline files for this release, scoped to its GitHub Pages directory. */
+const release='20261112-r2';
+const scope=new URL(self.registration.scope);
+const prefix='shubiki-bunko:'+scope.pathname+':';
+const cacheName=prefix+release;
+const index=new URL('index.html',scope).href;
+const ids=[
+ '321CONSTITUTION','129AC0000000089','140AC0000000045','132AC0000000048','408AC0000000109',
+ '323AC0000000131','405AC0000000088','426AC0000000068','337AC0000000139','322AC0000000125',
+ '322AC0000000067','326AC1000000004','417AC0000000086','415AC0000000057','411AC0000000042','index'
+];
+const files=new Set([
+ ...['style.css','roppo.css','atelier.css','reading.css','questions.js','advanced_questions.js',
+     'app.js','roppo.js','law-edition.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
+     .map(path=>new URL(path+'?v='+release,scope).href),
+ ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png'].map(path=>new URL(path,scope).href)
+]);
+self.addEventListener('install',event=>event.waitUntil((async()=>{
+ const cache=await caches.open(cacheName);
+ await cache.addAll([index,...files].map(url=>new Request(url,{cache:'reload'})));
+ await self.skipWaiting();
+})()));
+self.addEventListener('activate',event=>event.waitUntil((async()=>{
+ await Promise.all((await caches.keys()).filter(key=>key.startsWith(prefix)&&key!==cacheName).map(key=>caches.delete(key)));
+ await self.clients.claim();
+})()));
 self.addEventListener('fetch',event=>{
- if(event.request.method!=='GET')return;
- const url=new URL(event.request.url);
- if(url.origin!==self.location.origin)return;
- event.respondWith(caches.match(event.request).then(cached=>{
-  const update=fetch(event.request).then(response=>{
-    if(response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy)).catch(()=>{});}
-    return response;
-  }).catch(()=>cached||Response.error());
-  return cached||update;
- }));
+ const request=event.request;
+ if(request.method!=='GET')return;
+ const url=new URL(request.url);
+ if(url.origin!==scope.origin)return;
+ if(request.mode==='navigate'&&(url.pathname===scope.pathname||url.pathname===new URL(index).pathname)){
+  event.respondWith((async()=>{
+   try{
+    const online=await fetch(request);
+    if(online.ok)return online;
+   }catch{}
+   return await (await caches.open(cacheName)).match(index)||Response.error();
+  })());
+ }else if(files.has(url.href)){
+  event.respondWith(caches.open(cacheName).then(async cache=>await cache.match(request)||fetch(request)));
+ }
 });
