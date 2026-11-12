@@ -31,29 +31,15 @@ const NF=n=>Number(n||0).toLocaleString('ja-JP');
 
 const COLORS=['yellow','mint','pink','blue'];
 const EDITION=window.GYOSHI_EDITION;
+const LAW_VOICE=window.GYOSHI_LAW_VOICE;
 const readerRoute=()=>location.hash.split('?')[0]==='#roppo';
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
 const articlePattern=/^(preamble|main-[0-9_]+|suppl-[0-9]+-([0-9_]+|text)|appendix-[0-9]+|section-[0-9]+)$/;
 const legalDigits='0-9〇零一二三四五六七八九十百千';
 const articleQuery=new RegExp('^第?(['+legalDigits+']+)(?:条)?((?:[のノ_-]['+legalDigits+']+)*)$');
 function jpNumber(value){
- if(/^\d{1,6}$/.test(value))return String(Number(value));
- const digits='〇一二三四五六七八九';
- const units={十:10,百:100,千:1000};
- const chars=[...value.replace(/零/g,'〇')];
- if(!chars.every(c=>digits.includes(c)||units[c]))return '';
- if(!chars.some(c=>units[c]))return String(Number(chars.map(c=>digits.indexOf(c)).join('')));
- let total=0,digit=null,lastUnit=10000;
- for(const c of chars){
-  if(units[c]){
-   if(units[c]>=lastUnit)return '';
-   total+=(digit??1)*units[c];lastUnit=units[c];digit=null;
-  }else{
-   if(digit!==null)return '';
-   digit=digits.indexOf(c);
-  }
- }
- return String(total+(digit??0));
+ const number=LAW_VOICE.numberValue(value);
+ return Number.isSafeInteger(number)?String(number):'';
 }
 function articleNumber(value){
  const match=fold(value).replace(/\s+/g,'').match(articleQuery);
@@ -100,7 +86,13 @@ function fingerprint(text){
  for(let i=0;i<text.length;i++)hash=Math.imul(hash^text.charCodeAt(i),16777619);
  return (hash>>>0).toString(36);
 }
-function fresh(){return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{}};}
+function fresh(){
+ return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{},
+  voiceVolume:100,bgmVolume:22,bgmDuck:true,readings:[]};
+}
+function volumePercent(value,fallback){
+ return typeof value==='number'&&Number.isFinite(value)?Math.round(Math.max(0,Math.min(100,value))):fallback;
+}
 function cleanMeta(m){
  const f=fresh();if(!m||typeof m!=='object'||Array.isArray(m))return f;
  f.marks=Array.isArray(m.marks)?m.marks.filter(x=>x&&typeof x.lawId==='string'&&typeof x.articleId==='string'&&Number.isInteger(x.block)&&Number.isInteger(x.start)&&Number.isInteger(x.end)&&x.start>=0&&x.end>x.start&&x.end-x.start<=10000&&COLORS.includes(x.color)).slice(-15000).map(x=>({id:String(x.id||'m'+Date.now()),lawId:x.lawId,articleId:x.articleId,block:x.block,start:x.start,end:x.end,color:x.color,at:Number(x.at)||Date.now(),excerpt:String(x.excerpt||'').slice(0,160),stale:x.stale===true,checksum:typeof x.checksum==='string'?x.checksum.slice(0,16):''})):[];
@@ -108,13 +100,20 @@ function cleanMeta(m){
  f.notes=m.notes&&typeof m.notes==='object'&&!Array.isArray(m.notes)?Object.fromEntries(Object.entries(m.notes).filter(([k,v])=>typeof k==='string'&&typeof v==='string').slice(0,3000).map(([k,v])=>[k,v.slice(0,4000)])):{};
  f.rate=[.7,.85,1,1.15,1.3,1.5].includes(Number(m.rate))?Number(m.rate):1;
  f.voice=typeof m.voice==='string'?m.voice.slice(0,300):'';
+ f.voiceVolume=volumePercent(m.voiceVolume,f.voiceVolume);
+ f.bgmVolume=volumePercent(m.bgmVolume,f.bgmVolume);
+ f.bgmDuck=m.bgmDuck!==false;
+ f.readings=LAW_VOICE.cleanReadings(m.readings);
  f.lastLaw=typeof m.lastLaw==='string'?m.lastLaw:'321CONSTITUTION';
  f.custom=Array.isArray(m.custom)?m.custom.filter(x=>x&&/^[0-9A-Z]{10,22}$/.test(x.id)&&typeof x.name==='string').slice(0,100).map(x=>({id:x.id,name:x.name.slice(0,80),group:'追加法令',topic:'インポート'})):[];
  f.positions=m.positions&&typeof m.positions==='object'?Object.fromEntries(Object.entries(m.positions).filter(([key,val])=>/^[0-9A-Z]{10,22}$/.test(key)&&articlePattern.test(val)).slice(0,115)):{};
  return f;
 }
 let meta;try{meta=cleanMeta(JSON.parse(localStorage.getItem(METAKEY)||'null'));}catch(e){meta=fresh();}
-function writeMeta(){try{localStorage.setItem(METAKEY,JSON.stringify(meta));return true;}catch(e){note('メモやマーカーを端末に保存できません。容量・設定をご確認ください。','bad');return false;}}
+function writeMeta(){try{localStorage.setItem(METAKEY,JSON.stringify(meta));return true;}catch(e){note('設定や学習データを端末に保存できません。ブラウザの保存設定をご確認ください。','bad');return false;}}
+const bgm=window.GYOSHI_READER_BGM.createBgm(syncBgmControls);
+function syncBgmSettings(){bgm.configure(meta.bgmVolume,meta.bgmDuck);}
+syncBgmSettings();
 let dbPromise;
 function db(){if(!('indexedDB'in window))return Promise.reject(new Error('この環境ではIndexedDBが利用できません。'));
  if(dbPromise)return dbPromise;
@@ -130,7 +129,7 @@ async function storeGet(id){const d=await db();return new Promise((resolve,rejec
 async function storePut(value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 async function storeDelete(id){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 const mem=new Map();
-const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],selectedText:'',readingPack:false,packError:'',savedOpen:false,savedPage:1,controlsOpen:false,noteIds:new Set(),addOpen:false};
+const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],readingPack:false,packError:'',savedOpen:false,savedPage:1,controlsOpen:false,readingsOpen:false,noteIds:new Set(),addOpen:false};
 let lawReqToken=0,officialIndex=null,indexLoadedAt=null,indexBundled=false;
 let handledHash=null,requestedArticle='';
 const readRequests=new Map();
@@ -147,28 +146,83 @@ function directChild(parent,name){return [...(parent?.children||[])].find(n=>n.l
 function directChildren(parent,name){return [...(parent?.children||[])].filter(n=>n.localName===name);}
 function childText(el,name){return normalizeText(directChild(el,name)?.textContent||'');}
 function descendants(el,name){return [...(el?.getElementsByTagName(name)||[])];}
+function xmlFragment(element){
+ const raw=element?.textContent||'',t=normalizeText(raw);
+ if(!t||!element.getElementsByTagName('Ruby').length)return {t};
+ const ruby=[];
+ let offset=0;
+ function walk(node){
+  if(node.nodeType===3||node.nodeType===4){offset+=node.data.length;return;}
+  if(node.localName==='Ruby'){
+   const text=node.textContent;
+   const base=normalizeText([...node.childNodes].filter(child=>child.localName!=='Rt'&&(child.nodeType===1||child.nodeType===3||child.nodeType===4)).map(child=>child.textContent).join(''));
+   const rt=childText(node,'Rt'),written=normalizeText(text);
+   // A sentinel makes the prefix use the same trailing-space rules as the full text.
+   const start=normalizeText(raw.slice(0,offset)+'\uE000').length-1;
+   if(base&&rt&&t.slice(start,start+written.length)===written){
+    const reading=rt==='しゆん'?'しゅん':/[ぁ-ゖァ-ヺ]/u.test(rt)?rt:base;
+    ruby.push({start,end:start+written.length,base,reading});
+   }
+   offset+=text.length;
+   return;
+  }
+  if(node.nodeType===1)for(const child of node.childNodes)walk(child);
+ }
+ walk(element);
+ return ruby.length?{t,ruby}:{t};
+}
+function joinBlock(title,nodes,indent){
+ let t=title.t?title.t+'　':'';
+ const ruby=[...(title.ruby||[])];
+ let hasBody=false;
+ for(const node of nodes){
+  const part=xmlFragment(node);
+  if(!part.t)continue;
+  if(hasBody)t+=' ';
+  const offset=t.length;
+  for(const hint of part.ruby||[])ruby.push({...hint,start:hint.start+offset,end:hint.end+offset});
+  t+=part.t;hasBody=true;
+ }
+ return ruby.length?{t,indent,ruby}:{t,indent};
+}
 function blocksFromItem(item,level=0){
- const out=[];const title=childText(item,'ItemTitle')||childText(item,'Subitem1Title')||childText(item,'Subitem2Title')||childText(item,'Subitem3Title')||childText(item,'Subitem4Title')||childText(item,'Subitem5Title')||childText(item,'Subitem6Title')||childText(item,'Subitem7Title')||childText(item,'Subitem8Title')||childText(item,'Subitem9Title')||childText(item,'Subitem10Title');
- const body=[...item.children].filter(n=>/^(ItemSentence|Subitem\d+Sentence|Subitem\d+Column|ItemColumn)$/.test(n.localName)).map(n=>normalizeText(n.textContent)).filter(Boolean).join(' ');
- if(title||body)out.push({t:(title?title+'　':'')+body,indent:Math.min(level+1,5)});
- for(const c of item.children){if(/^(Subitem\d+|Item)$/.test(c.localName))out.push(...blocksFromItem(c,level+1));}
+ const out=[];
+ const title=xmlFragment([...item.children].find(node=>/^(ItemTitle|Subitem\d+Title)$/.test(node.localName)));
+ const body=[...item.children].filter(node=>/^(ItemSentence|Subitem\d+Sentence|Subitem\d+Column|ItemColumn)$/.test(node.localName));
+ const block=joinBlock(title,body,Math.min(level+1,5));
+ if(block.t)out.push(block);
+ for(const child of item.children)if(/^(Subitem\d+|Item)$/.test(child.localName))out.push(...blocksFromItem(child,level+1));
  return out;
 }
-function extractArticle(a,zone,index,lawTitle,heading){
- const title=childText(a,'ArticleTitle')||'第'+(a.getAttribute('Num')||index)+'条';
- const caption=childText(a,'ArticleCaption');
+function extractArticle(a,zone,index,heading){
+ const titlePart=xmlFragment(directChild(a,'ArticleTitle')),captionPart=xmlFragment(directChild(a,'ArticleCaption'));
  const num=a.getAttribute('Num')||String(index);
- const blocks=[];
+ const title=titlePart.t||'第'+num+'条';
+ const caption=captionPart.t,blocks=[];
  for(const p of directChildren(a,'Paragraph')){
-  const pn=childText(p,'ParagraphNum');
-  const sent=[...p.children].filter(n=>['ParagraphSentence','ParagraphColumn'].includes(n.localName)).map(n=>normalizeText(n.textContent)).filter(Boolean).join(' ');
-  if(sent||pn)blocks.push({t:(pn?pn+'　':'')+sent,indent:0});
-  for(const c of p.children){if(c.localName==='Item')blocks.push(...blocksFromItem(c));else if(['TableStruct','FigStruct','StyleStruct','List'].includes(c.localName)){
-   const t=normalizeText(c.textContent);if(t)blocks.push({t,indent:1});
-  }}
+  const lead=xmlFragment(directChild(p,'ParagraphNum'));
+  const sentences=[...p.children].filter(node=>['ParagraphSentence','ParagraphColumn'].includes(node.localName));
+  const block=joinBlock(lead,sentences,0);
+  if(block.t)blocks.push(block);
+  for(const child of p.children){
+   if(child.localName==='Item')blocks.push(...blocksFromItem(child));
+   else if(['TableStruct','FigStruct','StyleStruct','List'].includes(child.localName)){
+    const part=xmlFragment(child);
+    if(part.t)blocks.push({...part,indent:1});
+   }
+  }
  }
- if(!blocks.length){const txt=normalizeText(a.textContent);const stripped=txt.replace(caption,'').replace(title,'').trim();if(stripped)blocks.push({t:stripped,indent:0});}
- return {id:zone+'-'+num,title,caption,number:num,heading,zone,blocks,search:[title,caption,heading,...blocks.map(b=>b.t)].join(' ').toLowerCase()};
+ if(!blocks.length){
+  const fragment=xmlFragment(a);
+  const text=fragment.t.replace(caption,'').replace(title,'').trim();
+  const start=fragment.t.indexOf(text);
+  if(text)blocks.push(start<0?{t:text,indent:0}:{...LAW_VOICE.sliceFragment(fragment,start,start+text.length),indent:0});
+ }
+ const result={id:zone+'-'+num,title,caption,number:num,heading,zone,blocks,
+  search:[title,caption,heading,...blocks.map(block=>block.t)].join(' ').toLowerCase()};
+ if(titlePart.ruby)result.titleRuby=titlePart.ruby;
+ if(captionPart.ruby)result.captionRuby=captionPart.ruby;
+ return result;
 }
 function findHead(a){for(let x=a.parentElement;x&&x.localName!=='MainProvision'&&x.localName!=='SupplProvision';x=x.parentElement){const names=['SubsectionTitle','SectionTitle','ChapterTitle','PartTitle','DivisionTitle'];for(const key of names){const t=childText(x,key);if(t)return t;}}return '';}
 function readXml(xml,id,imported=false){
@@ -180,23 +234,23 @@ function readXml(xml,id,imported=false){
  const body=directChild(root,'LawBody');if(!body)throw Error('法令本文の LawBody が見つかりません。');
  const name=childText(body,'LawTitle')||selectedInfo().name;
  const lawNumber=childText(root,'LawNum');const articles=[];
- const pre=directChild(body,'Preamble');if(pre){const preText=normalizeText(pre.textContent);if(preText)articles.push({id:'preamble',title:'前文',caption:'',number:'',heading:'前文',zone:'main',blocks:[{t:preText,indent:0}],search:('前文 '+preText).toLowerCase()});}
- const main=directChild(body,'MainProvision');if(main){const nodes=descendants(main,'Article').filter(a=>!a.parentElement?.closest('Article'));nodes.forEach((a,i)=>articles.push(extractArticle(a,'main',i+1,name,findHead(a))));}
+ const pre=xmlFragment(directChild(body,'Preamble'));if(pre.t)articles.push({id:'preamble',title:'前文',caption:'',number:'',heading:'前文',zone:'main',blocks:[{...pre,indent:0}],search:('前文 '+pre.t).toLowerCase()});
+ const main=directChild(body,'MainProvision');if(main){const nodes=descendants(main,'Article').filter(a=>!a.parentElement?.closest('Article'));nodes.forEach((a,i)=>articles.push(extractArticle(a,'main',i+1,findHead(a))));}
  // 付則は原始附則と各改正附則を識別するため、XML内の改正法令番号も表示する
  for(const [k,sup] of directChildren(body,'SupplProvision').entries()){
   const label=childText(sup,'SupplProvisionLabel')||'附則';const amend=sup.getAttribute('AmendLawNum');const heading=amend?label+'（'+amend+'）':label;
   const nodes=descendants(sup,'Article').filter(a=>!a.parentElement?.closest('Article'));
-  nodes.forEach((a,i)=>articles.push(extractArticle(a,'suppl-'+k,i+1,name,heading)));
-  if(!nodes.length){const text=normalizeText(sup.textContent);if(text)articles.push({id:'suppl-'+k+'-text',title:heading,caption:'',number:'',heading,zone:'suppl-'+k,blocks:[{t:text,indent:0}],search:(heading+' '+text).toLowerCase()});}
+  nodes.forEach((a,i)=>articles.push(extractArticle(a,'suppl-'+k,i+1,heading)));
+  if(!nodes.length){const part=xmlFragment(sup);if(part.t)articles.push({id:'suppl-'+k+'-text',title:heading,caption:'',number:'',heading,zone:'suppl-'+k,blocks:[{...part,indent:0}],search:(heading+' '+part.t).toLowerCase()});}
  }
  const appendices=[...body.children].filter(c=>c.localName.startsWith('Appdx'));
  appendices.push(...directChildren(body,'SupplProvision').flatMap(el=>[...el.children].filter(c=>c.localName.startsWith('SupplProvisionAppdx'))));
  for(const [i,part] of appendices.entries()){
   const label=[...part.children].filter(c=>/Title$/.test(c.localName)).map(x=>normalizeText(x.textContent)).filter(Boolean).join(' ')||'別表・別記 '+(i+1);
-  const text=normalizeText(part.textContent);if(text)articles.push({id:'appendix-'+i,title:label,caption:'',number:'',heading:'別表・別記',zone:'appendix',blocks:[{t:text,indent:0}],search:(label+' '+text).toLowerCase()});
+  const fragment=xmlFragment(part);if(fragment.t)articles.push({id:'appendix-'+i,title:label,caption:'',number:'',heading:'別表・別記',zone:'appendix',blocks:[{...fragment,indent:0}],search:(label+' '+fragment.t).toLowerCase()});
  }
  // ArticleだけでなくParagraphのみの法令（条建てでない法令）も表示可能にする
- if(main&&!articles.some(a=>a.zone==='main'&&a.id!=='preamble')){let j=0;for(const node of [...main.children]){const text=normalizeText(node.textContent);if(text)articles.push({id:'section-'+j,title:'本文 '+(++j),caption:'',number:'',heading:'本則',zone:'main',blocks:[{t:text,indent:0}],search:text.toLowerCase()});}}
+ if(main&&!articles.some(a=>a.zone==='main'&&a.id!=='preamble')){let j=0;for(const node of [...main.children]){const part=xmlFragment(node);if(part.t)articles.push({id:'section-'+j,title:'本文 '+(++j),caption:'',number:'',heading:'本則',zone:'main',blocks:[{...part,indent:0}],search:part.t.toLowerCase()});}}
  if(!articles.length)throw Error('このXMLから表示できる条文を抽出できませんでした。');
  const plainChars=articles.reduce((n,a)=>n+a.blocks.reduce((t,b)=>t+b.t.length,0),0);
  if(plainChars>5000000)throw Error('本文が大きすぎるため、読み込みを中止しました。');
@@ -414,6 +468,96 @@ function catalogHTML(){
  const needle=fold(s.lawFilter),list=allLaws().filter(x=>(s.group==='all'||x.group===s.group)&&(!needle||fold(x.name+' '+x.topic+' '+x.id).includes(needle)));
  return `<aside class="rp-catalog ${s.mobileCatalog?'rp-catalog-open':''}" aria-label="法令一覧" id="rp-catalog"><div class="rp-catalog-top"><div><strong>法令一覧</strong></div><span class="rp-count">${allLaws().length}法令</span></div><input class="rp-input rp-catalog-search" type="search" id="rp-lawfilter" placeholder="法令名を検索" value="${ESC(s.lawFilter)}" aria-label="法令名を検索"><div class="rp-tabs" role="group" aria-label="法令グループ">${[['all','すべて'],['六法','六法'],['行政法令','行政法令'],['追加法令','追加']].map(([x,t])=>`<button class="${s.group===x?'active':''}" data-rp="group" data-val="${x}">${t}</button>`).join('')}</div><div class="rp-lawlist">${list.length?list.map(x=>`<button class="rp-lawitem ${s.lawId===x.id?'selected':''}" data-rp="select" data-id="${x.id}"><span class="rp-lawitem-body"><strong>${ESC(x.name)}</strong><small>${ESC(x.topic||x.group)}</small></span><span class="rp-cache-status  ${EDITION?.has(x.id)||mem.has(x.id)?'cached':''}" title="法令本文の状態">${EDITION?.has(x.id)?'収録':mem.has(x.id)?'保存済':'要取得'}</span></button>`).join(''):'<div class="rp-mini-empty">該当する法令がありません。</div>'}</div><details id="rp-add-tools" class="rp-catalog-bottom rp-add-tools" ${s.addOpen?'open':''}><summary>法令を追加・更新</summary><button class="rp-button rp-secondary rp-full" data-rp="bulk" ${s.fetchingAll?'disabled':''}>${s.fetchingAll?'取得処理中…':'主要六法の公式本文を再取得'}</button>${s.bulkStatus?`<p class="rp-muted" role="status">${ESC(s.bulkStatus)}</p>`:''}<button class="rp-button rp-ghost rp-full" data-rp="choose-xml">＋ e-Gov法令XMLを取り込む</button><label class="rp-custom-label" for="rp-add-id">ほかの法令を追加（e-Gov法令ID）</label><div class="rp-custom-row"><input id="rp-add-id" class="rp-input" placeholder="例：321CONSTITUTION" maxlength="22" autocapitalize="characters" aria-label="追加する法令ID"><button class="rp-button rp-secondary" data-rp="add-law">追加</button></div><div class="rp-official-panel"><button class="rp-official-toggle" data-rp="toggle-index" aria-expanded="${s.indexOpen}">憲法・法律の公式目録から探す <span>${s.indexOpen?'−':'＋'}</span></button>${officialSearchHTML()}</div><small>追加法令の本文は、公式取得またはXML取込で開けます。</small></details></aside>`;
 }
+const volumeFields={'rp-voice-volume':'voiceVolume','rp-bgm-volume':'bgmVolume'};
+function updateVolume(input){
+ const key=volumeFields[input.id];
+ if(!Object.hasOwn(volumeFields,input.id))return false;
+ meta[key]=volumePercent(Number(input.value),meta[key]);
+ const output=EL(input.id+'-value');
+ if(output)output.value=meta[key]+'%';
+ if(key==='bgmVolume')syncBgmSettings();
+ return true;
+}
+function bgmLabel(){
+ const playing=bgm.state==='playing'||bgm.state==='loading';
+ const status={idle:'停止中',loading:'準備中',playing:'再生中',error:'BGMを再生できませんでした。もう一度お試しください。'};
+ return {button:playing?'BGMを停止':'BGMを再生',status:status[bgm.state]};
+}
+function syncBgmControls(){
+ const label=bgmLabel(),button=EL('rp-bgm-toggle'),status=EL('rp-bgm-status');
+ if(button)button.textContent=label.button;
+ if(status)status.textContent=label.status;
+}
+function bgmHTML(){
+ const label=bgmLabel();
+ return `<div class="rp-bgmbar" role="group" aria-label="BGMの操作">
+  <div class="rp-bgm-track"><strong>Hear your voice</strong><span class="rp-muted" id="rp-bgm-status" role="status">${ESC(label.status)}</span></div>
+  <button class="rp-button rp-ghost" id="rp-bgm-toggle" data-rp="toggle-bgm" type="button">${label.button}</button>
+ </div>`;
+}
+function volumeHTML(id,key,label,description=''){
+ const value=meta[key];
+ return `<div class="rp-volume-field">
+  <div class="rp-volume-caption"><label for="${id}">${label}</label><output id="${id}-value" for="${id}">${value}%</output></div>
+  <input type="range" id="${id}" min="0" max="100" step="1" value="${value}" ${description?`aria-describedby="${id}-hint"`:''}>
+  ${description?`<small id="${id}-hint">${description}</small>`:''}
+ </div>`;
+}
+function readingsList(){
+ if(!meta.readings.length)return '';
+ return `<ul class="rp-readings-list">${meta.readings.map(({word,reading})=>`<li>
+  <span><strong>${ESC(word)}</strong><span>${ESC(reading)}</span></span>
+  <button class="rp-button rp-ghost" data-rp="remove-reading" data-id="${ESC(word)}" type="button" aria-label="${ESC(word)}の読みを削除">削除</button>
+ </li>`).join('')}</ul>`;
+}
+function soundSettingsHTML(){
+ return `<div class="rp-sound-settings">
+  <div class="rp-sound-levels">
+   ${volumeHTML('rp-voice-volume','voiceVolume','読み上げ音量','再生中の変更は次の区切りから反映')}
+   ${volumeHTML('rp-bgm-volume','bgmVolume','BGM音量')}
+  </div>
+  <label class="rp-duck-setting"><input type="checkbox" id="rp-bgm-duck" ${meta.bgmDuck?'checked':''}>読み上げ中はBGMを小さくする</label>
+  <div class="rp-field rp-voice-field"><label for="rp-voice">日本語音声</label><select id="rp-voice" class="rp-input rp-voice-select">${voicesHTML()}</select></div>
+  <details class="rp-reading-rules" id="rp-reading-rules" ${s.readingsOpen?'open':''}>
+   <summary>読み方を登録 <span id="rp-rule-count">${meta.readings.length}件</span></summary>
+   <form class="rp-reading-form" id="rp-reading-form">
+    <div class="rp-field"><label for="rp-reading-word">条文の表記</label><input id="rp-reading-word" class="rp-input" required maxlength="40" placeholder="例：相殺"></div>
+    <div class="rp-field"><label for="rp-reading-kana">読み仮名</label><input id="rp-reading-kana" class="rp-input" required maxlength="80" placeholder="例：そうさい"></div>
+    <button class="rp-button rp-secondary" type="submit">登録する</button>
+   </form>
+   <p class="rp-muted">同じ表記を登録すると読み方を更新します。</p>
+   <div id="rp-readings-list">${readingsList()}</div>
+  </details>
+ </div>`;
+}
+function updateReadings(readings){
+ const previous=meta.readings;
+ meta.readings=readings;
+ if(!writeMeta()){meta.readings=previous;return false;}
+ const host=EL('rp-readings-list'),count=EL('rp-rule-count');
+ if(host)host.innerHTML=readingsList();
+ if(count)count.textContent=readings.length+'件';
+ return true;
+}
+function saveReading(event){
+ if(event.target.id!=='rp-reading-form')return;
+ event.preventDefault();
+ const input=EL('rp-reading-word'),kana=EL('rp-reading-kana');
+ const [rule]=LAW_VOICE.cleanReadings([{word:input.value,reading:kana.value}]);
+ if(!rule){note('条文の表記と、ひらがな・カタカナの読み仮名を入力してください。');return;}
+ const existing=meta.readings.filter(entry=>entry.word!==rule.word);
+ if(existing.length>=100){note('読み方は100件まで登録できます。');return;}
+ if(updateReadings([...existing,rule])){
+  event.target.reset();input.focus({preventScroll:true});
+  note('読み方を保存しました。次に読み上げを始めると反映されます。');
+ }
+}
+function removeReading(word){
+ if(updateReadings(meta.readings.filter(entry=>entry.word!==word))){
+  EL('rp-reading-word')?.focus({preventScroll:true});note('登録した読み方を削除しました。');
+ }
+}
+
 function readerHTML(){
  const doc=mem.get(s.lawId),info=selectedInfo(),available=Boolean(doc);
  const official=`https://laws.e-gov.go.jp/law/${encodeURIComponent(s.lawId)}`;
@@ -427,8 +571,9 @@ function readerHTML(){
  ${s.readingPack?'':`<p>公式e-Govの本文を取得するか、法令XMLを取り込んで閲覧できます。</p><div class="rp-actions center"><button class="rp-button rp-primary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>公式本文を取得する</button><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button></div>`}</div>`:
  `<div class="rp-readtools"><div class="rp-field"><label for="rp-textsearch">条番号・語句</label><input class="rp-input" type="search" id="rp-textsearch" value="${ESC(s.textFilter)}" placeholder="例：95、第一条、取消し"></div><div class="rp-field rp-scope"><label for="rp-scope">表示範囲</label><select class="rp-input" id="rp-scope" data-rp="scope"><option value="main" ${s.articleScope==='main'?'selected':''}>本則・前文</option><option value="suppl" ${s.articleScope==='suppl'?'selected':''}>附則</option><option value="appendix" ${s.articleScope==='appendix'?'selected':''}>別表・別記</option><option value="all" ${s.articleScope==='all'?'selected':''}>すべて</option></select></div></div>
  ${tocHTML(doc)}<div class="rp-filter-row"><button class="rp-filter ${s.onlyBookmarked?'active':''}" data-rp="only-book">しおり</button><button class="rp-filter ${s.onlyMarked?'active':''}" data-rp="only-mark">マーカー</button><span class="rp-results" role="status">${NF(counts.length)}件該当 · ${pg}/${pages}ページ</span></div>
- <details class="rp-reader-controls" id="rp-reader-controls" ${s.controlsOpen?'open':''}><summary>読み上げ設定・マーカー</summary><div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文をドラッグ、または長押しして色を選びます。</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button><label for="rp-voice" class="rp-muted">日本語音声</label><select id="rp-voice" class="rp-input rp-voice-select">${voicesHTML()}</select></div></details>
  <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page" ${counts.length?'':'disabled'}>▷ 表示中の条文を読む</button><button class="rp-button rp-ghost" data-rp="pause" id="rp-voice-pause" ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button><button class="rp-button rp-ghost" data-rp="stop" id="rp-voice-stop" ${speaking?'':'disabled'}>停止</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">${ESC(voiceStatus)}</span></div>
+ ${bgmHTML()}
+ <details class="rp-reader-controls" id="rp-reader-controls" ${s.controlsOpen?'open':''}><summary>音声・BGM設定とマーカー</summary>${soundSettingsHTML()}<div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文をドラッグ、または長押しして色を選びます。</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button></div></details>
  <div class="rp-read-meta"><p>本文：${ESC(doc.source)}。条文は学習用に整形して表示します。公式の脚注・図表等は原文で確認してください。</p></div>
  <div class="rp-articles" id="rp-articles">${shown.length?shown.map(articleHTML).join(''):'<div class="rp-empty">一致する条文がありません。検索条件・本則／附則の切替をご確認ください。</div>'}</div>
  ${pages>1?`<nav class="rp-pagination" aria-label="条文ページ"><button class="rp-button rp-secondary" data-rp="page" data-page="${pg-1}" ${pg===1?'disabled':''}>← 前へ</button><span>${pg} / ${pages} ページ</span><button class="rp-button rp-secondary" data-rp="page" data-page="${pg+1}" ${pg===pages?'disabled':''}>次へ →</button></nav>`:''}
@@ -500,7 +645,7 @@ function display(){
  requestAnimationFrame(ensureSelected);return renderHTML();
 }
 function clearSelection(removeRange=false){
- s.selection=[];s.selectedText='';
+ s.selection=[];
  const tray=EL('rp-selection-tray');if(tray)tray.hidden=true;
  if(removeRange)window.getSelection()?.removeAllRanges();
 }
@@ -516,7 +661,7 @@ function selectionCapture(){
   if(result.length>80)break;
  }
  if(result.length){
-  s.selection=result;s.selectedText=result.map(x=>x.excerpt).join(' ').slice(0,12000);
+  s.selection=result;
   const tray=EL('rp-selection-tray');if(tray)tray.hidden=false;
  }else clearSelection();
 }
@@ -551,27 +696,62 @@ function indicateSpeech(id){
 }
 function voiceState(t){
  voiceStatus=t;
+ bgm.setSpeaking(speaking&&!paused&&utterance?.volume>0);
  const label=EL('rp-tts-state'),pause=EL('rp-voice-pause'),stop=EL('rp-voice-stop');
  if(label)label.textContent=t;
  if(pause){pause.disabled=!speaking;pause.textContent=paused?'再開':'一時停止';}
  if(stop)stop.disabled=!speaking;
 }
-function stopVoice(){speakTokens++;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;indicateSpeech('');try{window.speechSynthesis?.cancel();}catch(e){}voiceState('停止中');}
+function stopVoice(){
+ const active=speaking||utterance;
+ ++speakTokens;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;indicateSpeech('');
+ if(active)try{window.speechSynthesis?.cancel();}catch{}
+ voiceState('停止中');
+}
+function stopReaderAudio(){
+ stopVoice();bgm.pause();EL('rp-mark-manager')?.remove();
+}
 function splitSpeech(str){const parts=String(str).replace(/\s+/g,' ').match(/[^。！？!？\n]+[。！？!？]?/g)||[str],chunks=[];
  for(const part of parts){let cur=part;while(cur.length>150){let cut=cur.lastIndexOf('、',150);if(cut<65)cut=150;else cut++;chunks.push(cur.slice(0,cut));cur=cur.slice(cut);}if(cur.trim())chunks.push(cur.trim());}
  return chunks.slice(0,1500);
 }
 function getVoice(){const voices=window.speechSynthesis?.getVoices?.()||[];return voices.find(x=>x.lang?.toLowerCase().startsWith('ja')&&(x.voiceURI===meta.voice))||voices.find(x=>x.lang?.toLowerCase().startsWith('ja'))||null;}
 function speakNext(token){if(token!==speakTokens||paused||utterance)return;if(segIndex>=segments.length){speaking=false;paused=false;indicateSpeech('');voiceState('読み上げ完了');return;}
- const segment=segments[segIndex++],utter=new SpeechSynthesisUtterance(segment.text);utterance=utter;indicateSpeech(segment.id);utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;const voice=getVoice();if(voice)utter.voice=voice;
+ const segment=segments[segIndex++],utter=new SpeechSynthesisUtterance(segment.text);utterance=utter;indicateSpeech(segment.id);utter.lang='ja-JP';utter.rate=meta.rate;utter.pitch=1;utter.volume=meta.voiceVolume/100;const voice=getVoice();if(voice)utter.voice=voice;
  utter.onend=()=>{if(token===speakTokens){utterance=null;requestAnimationFrame(()=>speakNext(token));}};utter.onerror=(event)=>{if(token!==speakTokens)return;stopVoice();voiceState('端末の日本語音声をご確認ください');};
  voiceState(`読み上げ中 ${segIndex}/${segments.length}`);try{window.speechSynthesis.speak(utter);}catch(e){stopVoice();note('この端末では読み上げを開始できません。','bad');}
 }
 function startSpeech(items){stopVoice();if(!speaker()){note('このブラウザは音声読み上げに対応していません。OSとブラウザの音声機能をご確認ください。','bad');return;}
- segments=items.flatMap(item=>splitSpeech(item.text).map(text=>({id:item.id,text})));
+ const pronounce=LAW_VOICE.reader(meta.readings);
+ segments=items.flatMap(item=>{
+  const text=item.parts.filter(part=>part.t).map(pronounce).join('。').replace(/。{2,}/g,'。');
+  return splitSpeech(text).map(fragment=>({id:item.id,text:fragment}));
+ });
  if(!segments.length){note('読み上げる文章を選択してください。');return;}speaking=true;paused=false;const token=speakTokens;speakNext(token);
 }
-function speechPage(){const d=mem.get(s.lawId);if(!d)return;const shown=shownArticles(d).slice((s.page-1)*s.pageSize,s.page*s.pageSize);startSpeech(shown.map(a=>({id:a.id,text:[a.title,a.caption,...a.blocks.map(b=>b.t)].filter(Boolean).join('。')})));}
+function speechArticle(article){
+ return {id:article.id,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
+}
+function speechPage(){
+ const law=mem.get(s.lawId);if(!law)return;
+ const visible=shownArticles(law).slice((s.page-1)*s.pageSize,s.page*s.pageSize);
+ startSpeech(visible.map(speechArticle));
+}
+function speechSelection(){
+ selectionCapture();
+ const items=[];
+ let remaining=12000;
+ for(const selection of s.selection){
+  if(!remaining)break;
+  const block=getArticle(selection.articleId)?.blocks[selection.block];
+  if(!block||block.t.slice(selection.start,selection.end)!==selection.excerpt)continue;
+  const end=Math.min(selection.end,selection.start+remaining);
+  const part=LAW_VOICE.sliceFragment(block,selection.start,end);
+  remaining-=part.t.length;
+  items.push({id:selection.articleId,parts:[part]});
+ }
+ startSpeech(items);
+}
 function togglePause(){if(!speaker()||!speaking){note('先に読み上げを開始してください。');return;}try{if(paused){window.speechSynthesis.resume();paused=false;if(!utterance)speakNext(speakTokens);}else{window.speechSynthesis.pause();paused=true;}voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);}catch(e){note('一時停止に失敗しました。');}}
 function manageMarks(articleId){
  const list=meta.marks.filter(x=>x.lawId===s.lawId&&x.articleId===articleId);
@@ -635,14 +815,17 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='marks-manage'){manageMarks(id);return;}
  if(op==='close-manager'){EL('rp-mark-manager')?.remove();return;}
  if(op==='delete-mark'){meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
- if(op==='speak-article'){const a=getArticle(id);if(a)startSpeech([{id:a.id,text:[a.title,a.caption,...a.blocks.map(b=>b.t)].filter(Boolean).join('。')}]);return;}
- if(op==='speak-selection'){selectionCapture();startSpeech([{id:s.selection[0]?.articleId||'',text:s.selectedText}]);return;}
+ if(op==='speak-article'){const article=getArticle(id);if(article)startSpeech([speechArticle(article)]);return;}
+ if(op==='speak-selection'){speechSelection();return;}
  if(op==='speak-page'){speechPage();return;}
+ if(op==='toggle-bgm'){bgm.toggle();return;}
+ if(op==='remove-reading'){removeReading(id);return;}
  if(op==='pause'){togglePause();return;}
  if(op==='stop'){stopVoice();return;}
  if(op==='delete-law'){if(!confirm(`${selectedInfo().name}の保存済み本文を端末から削除しますか？\nマーカー・メモ・ブックマークは残ります。`))return;const lawId=s.lawId;mem.delete(lawId);storeDelete(lawId).then(()=>{refresh();note('本文データを削除しました。');}).catch(()=>note('保存済み本文を削除できませんでした。','bad'));refresh();return;}
 }
 function handlerInput(ev){const el=ev.target;if(!readerRoute())return;
+ if(updateVolume(el))return;
  if(!ev.isComposing&&el.id==='rp-textsearch'&&s.textFilter!==el.value.slice(0,150)){s.textFilter=el.value.slice(0,150);s.page=1;stopVoice();refresh({keepFocus:true});}
  if(!ev.isComposing&&el.id==='rp-lawfilter'&&s.lawFilter!==el.value.slice(0,150)){s.lawFilter=el.value.slice(0,150);refresh({keepFocus:true});}
  if(!ev.isComposing&&el.id==='rp-index-search'&&s.indexSearch!==el.value.slice(0,120)){s.indexSearch=el.value.slice(0,120);refresh({keepFocus:true});}
@@ -654,14 +837,18 @@ function handlerChange(ev){const el=ev.target;if(!readerRoute())return;
  if(el.id==='rp-scope'){stopVoice();s.articleScope=el.value;s.page=1;refresh({keepFocus:true});}
  if(el.id==='rp-toc'&&el.value)jumpTo(el.value);
  if(el.id==='rp-voice'){meta.voice=el.value;writeMeta();}
+ if(el.id==='rp-bgm-duck'){meta.bgmDuck=el.checked;syncBgmSettings();writeMeta();}
+ if(updateVolume(el))writeMeta();
  if(el.id==='rp-rate'){meta.rate=Number(el.value)||1;writeMeta();note('次の読み上げから速度を変更します。');}
  if(el.id==='rp-import'){const f=el.files?.[0];if(f)importXml(f);el.value='';}
 }
 let bound=false;
 function bind(){if(bound)return;bound=true;document.addEventListener('click',handlerClick);document.addEventListener('input',handlerInput);document.addEventListener('change',handlerChange);
  document.addEventListener('compositionend',handlerInput);
+ document.addEventListener('submit',saveReading);
  document.addEventListener('toggle',event=>{
   if(event.target.id==='rp-reader-controls')s.controlsOpen=event.target.open;
+  if(event.target.id==='rp-reading-rules')s.readingsOpen=event.target.open;
   if(event.target.id==='rp-add-tools')s.addOpen=event.target.open;
  },true);
  document.addEventListener('pointerdown',event=>{
@@ -678,9 +865,9 @@ function bind(){if(bound)return;bound=true;document.addEventListener('click',han
    const shown=shownArticles(mem.get(s.lawId));if(shown.length===1){e.preventDefault();jumpTo(shown[0].id);}
   }
  });
- document.addEventListener('visibilitychange',()=>{if(document.hidden)stopVoice();});
- window.addEventListener('pagehide',stopVoice);
- window.addEventListener('hashchange',()=>{if(!readerRoute()){stopVoice();EL('rp-mark-manager')?.remove();}});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)stopReaderAudio();});
+ window.addEventListener('pagehide',stopReaderAudio);
+ window.addEventListener('hashchange',()=>{if(!readerRoute())stopReaderAudio();});
 }
 function exportMeta(){return JSON.parse(JSON.stringify(meta));}
 function importMeta(data){
@@ -688,9 +875,9 @@ function importMeta(data){
  const previous=meta;meta=cleanMeta(data);
  if(!writeMeta()){meta=previous;return false;}
  s.lawId=allLaws().some(item=>item.id===meta.lastLaw)?meta.lastLaw:CATALOG[0][0];
- handledHash=null;refresh();return true;
+ handledHash=null;stopReaderAudio();syncBgmSettings();refresh();return true;
 }
-function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopVoice();refresh();}
-window.GYOSHI_ROPPO={render:display,bind,stop:()=>{stopVoice();EL('rp-mark-manager')?.remove();},references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
+function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopReaderAudio();syncBgmSettings();refresh();}
+window.GYOSHI_ROPPO={render:display,bind,stop:stopReaderAudio,references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
 bind();
 })();
