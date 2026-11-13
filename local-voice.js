@@ -36,7 +36,6 @@
   }
   function play(){
    if(closed||source)return;
-   if(context.state!=='running')context.resume().catch(()=>{});
    if(offset>=buffer.duration){stop();onEnd();return;}
    source=context.createBufferSource();
    source.buffer=buffer;source.connect(gain);

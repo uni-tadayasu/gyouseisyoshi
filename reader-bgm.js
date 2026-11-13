@@ -5,8 +5,13 @@
  const trackURL=new URL('assets/hear-your-voice.mp3',scriptURL);
  trackURL.search=scriptURL.search;
 
- function allowMixing(){
-  try{if(navigator.audioSession)navigator.audioSession.type='ambient';}catch{}
+ // Audio on this page is media, so iOS can play it even in Silent Mode.
+ function useMediaSession(){
+  try{
+   const session=navigator.audioSession;
+   if(session&&session.type!=='playback')session.type='playback';
+   return session?.type==='playback';
+  }catch{return false;}
  }
 
  function createBgm(onChange){
@@ -50,6 +55,11 @@
     if(wanted&&source)setState(context.state==='running'?'playing':'interrupted');
    });
   }
+  function resumeContext(){
+   useMediaSession();
+   if(!context||context.state==='closed'||context.state==='running')return Promise.resolve();
+   return context.resume();
+  }
   function decodeTrack(){
    if(!loadTrack){
     loadTrack=fetch(trackURL.href).then(response=>{
@@ -63,9 +73,10 @@
    return loadTrack;
   }
   function playBuffer(token){
+   useMediaSession();
    createContext();
    // Resume is requested inside the original user interaction, before decoding.
-   const ready=context.state==='running'?Promise.resolve():context.resume();
+   const ready=resumeContext();
    return Promise.all([ready,decodeTrack()]).then(([,track])=>{
     if(!wanted||token!==generation)return;
     source=context.createBufferSource();
@@ -92,6 +103,7 @@
    return audio;
   }
   function playMedia(token){
+   useMediaSession();
    const element=media();
    syncVolume();
    return Promise.resolve(element.play()).then(()=>{
@@ -106,7 +118,7 @@
    if(wanted){pause();return;}
    wanted=true;
    const token=++generation;
-   allowMixing();setState('loading');
+   setState('loading');
    try{
     if(!useBuffer){playMedia(token).catch(()=>fail(token));return;}
     playBuffer(token).catch(()=>{
@@ -123,9 +135,7 @@
    if(!wanted||resuming||state==='loading')return;
    const token=generation;
    if(source&&context.state!=='running'){
-    allowMixing();
-    resuming=true;
-    context.resume().catch(()=>{}).finally(()=>{resuming=false;});
+    resumeContext().catch(()=>{});
    }else if(audio?.paused){
     resuming=true;
     playMedia(token).catch(()=>{}).finally(()=>{resuming=false;});
@@ -135,17 +145,17 @@
   function voiceOutput(){
    if(!AudioEngine)return null;
    try{
-    allowMixing();createContext();
-    if(context.state!=='running')context.resume().catch(()=>{});
+    useMediaSession();createContext();
+    resumeContext().catch(()=>{});
     return context;
    }catch{return null;}
   }
   return {
    get state(){return state;},
    get requested(){return wanted;},
-   voiceOutput,
+   voiceOutput,resumeContext,
    toggle,pause,keepPlaying,
-   beforeSpeech(){allowMixing();keepPlaying();},
+   beforeSpeech(){const supported=useMediaSession();keepPlaying();return supported;},
    configure(percent,lowerWhileReading){volume=percent/100;duck=lowerWhileReading;syncVolume();},
    setSpeaking(active){
     if(speaking===active)return;

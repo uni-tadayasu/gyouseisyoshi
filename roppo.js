@@ -878,14 +878,18 @@ function meaningParts(term){
  const reading=meta.readings.find(rule=>rule.word===term.name)?.reading||term.reading||term.name;
  return [{t:reading+'。意味。'},...(term.definitions||[term.meaning]).map(meaning=>({t:meaning}))];
 }
+const appleMobile=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}){
  stopVoice();
+ const mediaSession=bgm.beforeSpeech();
  outputContext=LOCAL_VOICE?.available?bgm.voiceOutput():null;
- if((!nativeSpeech()||!getVoice())&&!outputContext){
+ const deviceVoice=nativeSpeech()?getVoice():null;
+ if(!deviceVoice&&!outputContext){
   voiceState('このブラウザでは読み上げを利用できません');
   note('ブラウザと端末の日本語音声をご確認ください。','bad');return;
  }
- const useLocal=outputContext&&(meta.voice==='builtin-ja'||!getVoice()||(!meta.voice&&bgm.requested));
+ const automaticLocal=!meta.voice&&(bgm.requested||(appleMobile&&mediaSession));
+ const useLocal=outputContext&&(meta.voice==='builtin-ja'||!deviceVoice||automaticLocal);
  voiceEngine=useLocal?'local':'native';
  const pronounce=LAW_VOICE.reader(meta.readings);
  const explained=new Set();
@@ -904,7 +908,7 @@ function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}
   return splitSpeech(utterances.join('\n')).map(text=>({id:item.id||'',text}));
  });
  if(!segments.length){voiceEngine='';voiceState('読み上げる文章がありません');return;}
- voiceKind=kind;speaking=true;paused=false;bgm.beforeSpeech();speakNext(speakTokens);
+ voiceKind=kind;speaking=true;paused=false;speakNext(speakTokens);
 }
 function speakMeaning(term){
  if(term)startSpeech([{parts:meaningParts(term)}],{kind:'meaning',withMeanings:false});
@@ -973,8 +977,10 @@ function togglePause(){
   paused=!paused;
   if(voiceEngine==='local'){
    if(paused)localPlayer?.pause();
-   else if(localPlayer)localPlayer.play();
-   else speakNext(speakTokens);
+   else{
+    bgm.resumeContext().catch(()=>{});
+    if(localPlayer)localPlayer.play();else speakNext(speakTokens);
+   }
   }else if(paused)window.speechSynthesis.pause();
   else{window.speechSynthesis.resume();if(!utterance)speakNext(speakTokens);}
   voiceState(paused?'一時停止中':`読み上げ中 ${segIndex}/${segments.length}`);
@@ -1097,7 +1103,13 @@ function bind(){if(bound)return;bound=true;document.addEventListener('click',han
    const shown=shownArticles(mem.get(s.lawId));if(shown.length===1){e.preventDefault();jumpTo(shown[0].id);}
   }
  });
- document.addEventListener('visibilitychange',()=>{if(!document.hidden)bgm.keepPlaying();});
+ function resumeAudio(){
+  if(document.hidden)return;
+  bgm.keepPlaying();
+  if(speaking&&!paused&&voiceEngine==='local')bgm.resumeContext().catch(()=>{});
+ }
+ document.addEventListener('visibilitychange',resumeAudio);
+ window.addEventListener('pageshow',resumeAudio);
  window.addEventListener('pagehide',stopReaderAudio);
 }
 function exportMeta(){return JSON.parse(JSON.stringify(meta));}
