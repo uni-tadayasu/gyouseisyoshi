@@ -17,7 +17,7 @@
   if(requests.has(id))return requests.get(id);
   const promise=new Promise((resolve,reject)=>{
    const script=document.createElement('script');
-   script.src=new URL(id+'.js?v=20261113-r8',dir);
+   script.src=new URL(id+'.js?v=20261113-r9',dir);
    script.onload=()=>{
     script.remove();
     const payload=payloads.get(id);payloads.delete(id);

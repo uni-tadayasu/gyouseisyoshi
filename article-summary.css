@@ -1,0 +1,39 @@
+/* 条文に添える学習欄 */
+.rp-summary-toolbar {
+ display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+ padding: 8px 10px; margin: 0 0 9px; color: var(--ink);
+ background: var(--surface2); border: 1px solid var(--line); border-radius: 6px;
+}
+.rp-summary-toolbar label { font-weight: 700; }
+.rp-summary-toolbar select { width: auto; max-width: 100%; }
+.rp-summary-toolbar button { margin-inline-start: auto; }
+.rp-summary {
+ padding: clamp(11px, 2.2vw, 17px); margin: 0 0 18px;
+ border: 1px solid var(--line); border-inline-start: 3px solid var(--gold);
+ border-radius: 6px; background: var(--surface2); color: var(--ink);
+}
+.rp-summary-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 5px; }
+.rp-summary-head h4 { margin: 0; font: 750 1.05rem/1.6 var(--serif); }
+.rp-summary-label { font-size: .72rem; color: var(--muted); }
+.rp-summary-head .rp-summary-listen { margin-inline-start: auto; font-size: .77rem; min-height: 40px; }
+.rp-summary-gist { margin: 0; font-size: .94rem; font-weight: 650; line-height: 1.95; }
+.rp-summary-details { border-top: 1px solid var(--line); margin-top: 10px; }
+.rp-summary-details > summary { cursor: pointer; padding-block: 8px; color: var(--accent); font-weight: 750; }
+.rp-summary-explanation { line-height: 1.9; font-size: .86rem; }
+.rp-summary-explanation p { margin: 0 0 7px; }
+.rp-summary-explanation ul { margin: 7px 0 0; padding-inline-start: 1.2em; }
+.rp-summary-explanation li + li { margin-top: 8px; }
+.rp-summary-explanation li strong { display: block; font-size: .75rem; color: var(--muted); }
+.rp-summary-explanation button, .rp-summary .rp-summary-show-body {
+ display: inline-block; padding: 6px 2px; min-height: 33px; font-size: .75rem; text-decoration: underline;
+}
+.rp-paragraph:focus { outline: 2px solid var(--gold); outline-offset: 4px; }
+@media(max-width: 520px) {
+ .rp-summary-toolbar button { margin-inline-start: 0; }
+ .rp-summary-head .rp-summary-listen { width: 100%; margin-inline-start: 0; min-height: 43px; }
+ .rp-summary-gist { font-size: .87rem; }
+ .rp-summary-explanation button, .rp-summary .rp-summary-show-body { min-height: 42px; }
+}
+@media print {
+ .rp-summary-toolbar, .rp-summary-listen, .rp-summary-jump, .rp-summary-show-body { display: none!important; }
+}

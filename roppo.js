@@ -34,6 +34,7 @@ const EDITION=window.GYOSHI_EDITION;
 const LAW_VOICE=window.GYOSHI_LAW_VOICE;
 const LOCAL_VOICE=window.GYOSHI_LOCAL_VOICE;
 const GUIDE=window.GYOSHI_GUIDE;
+const ARTICLE_SUMMARY=window.GYOSHI_ARTICLE_SUMMARY;
 const readerRoute=()=>location.hash.split('?')[0]==='#roppo';
 const fold=value=>String(value??'').normalize('NFKC').toLowerCase().trim();
 const articlePattern=/^(preamble|main-[0-9_]+|suppl-[0-9]+-([0-9_]+|text)|appendix-[0-9]+|section-[0-9]+)$/;
@@ -90,7 +91,7 @@ function fingerprint(text){
 }
 function fresh(){
  return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{},
-  voiceVolume:100,bgmVolume:22,bgmDuck:true,readTermMeanings:false,readings:[]};
+  voiceVolume:100,bgmVolume:22,bgmDuck:true,readTermMeanings:false,readings:[],summaryView:'both'};
 }
 function volumePercent(value,fallback){
  return typeof value==='number'&&Number.isFinite(value)?Math.round(Math.max(0,Math.min(100,value))):fallback;
@@ -106,6 +107,7 @@ function cleanMeta(m){
  f.bgmVolume=volumePercent(m.bgmVolume,f.bgmVolume);
  f.bgmDuck=m.bgmDuck!==false;
  f.readTermMeanings=m.readTermMeanings===true;
+ f.summaryView=['both','summary','body'].includes(m.summaryView)?m.summaryView:'both';
  f.readings=LAW_VOICE.cleanReadings(m.readings);
  f.lastLaw=typeof m.lastLaw==='string'?m.lastLaw:'321CONSTITUTION';
  f.custom=Array.isArray(m.custom)?m.custom.filter(x=>x&&/^[0-9A-Z]{10,22}$/.test(x.id)&&typeof x.name==='string').slice(0,100).map(x=>({id:x.id,name:x.name.slice(0,80),group:'追加法令',topic:'インポート'})):[];
@@ -132,7 +134,7 @@ async function storeGet(id){const d=await db();return new Promise((resolve,rejec
 async function storePut(value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 async function storeDelete(id){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction(DBSTORE,'readwrite');tx.objectStore(DBSTORE).delete(id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}
 const mem=new Map();
-const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],readingPack:false,packError:'',savedOpen:false,savedPage:1,controlsOpen:false,readingsOpen:false,noteIds:new Set(),addOpen:false};
+const s={lawId:CATALOG.some(x=>x[0]===meta.lastLaw)||meta.custom.some(x=>x.id===meta.lastLaw)?meta.lastLaw:'321CONSTITUTION',group:'all',lawFilter:'',textFilter:'',articleScope:'main',onlyMarked:false,onlyBookmarked:false,page:1,pageSize:18,mobileCatalog:false,loading:false,fetchingAll:false,bulkStatus:'',loadingIndex:false,indexOpen:false,indexSearch:'',indexError:'',error:'',selection:[],readingPack:false,packError:'',savedOpen:false,savedPage:1,controlsOpen:false,readingsOpen:false,noteIds:new Set(),summaryOpen:new Set(),visibleBodies:new Set(),addOpen:false};
 let lawReqToken=0,officialIndex=null,indexLoadedAt=null,indexBundled=false;
 let handledHash=null,requestedArticle='';
 const readRequests=new Map();
@@ -398,7 +400,7 @@ async function fetchSix(){if(s.fetchingAll||s.loading)return;s.fetchingAll=true;
 function setLaw(id){
  stopVoice();s.lawId=id;meta.lastLaw=id;writeMeta();
  s.page=1;s.articleScope='main';s.textFilter='';s.onlyMarked=false;s.onlyBookmarked=false;
- s.mobileCatalog=false;s.error='';s.packError='';s.noteIds.clear();clearSelection();
+ s.mobileCatalog=false;s.error='';s.packError='';s.noteIds.clear();s.summaryOpen.clear();s.visibleBodies.clear();clearSelection();
  s.readingPack=!mem.has(id)&&Boolean(EDITION?.has(id));++lawReqToken;
 }
 function onSelect(id,article=''){
@@ -473,12 +475,41 @@ function markedContent(a,i,block){
   return html;
  });
 }
+function getSummary(article){
+ const doc=mem.get(s.lawId);
+ return ARTICLE_SUMMARY?.summarize(article,s.lawId,{bundled:doc?.bundled===true});
+}
+function summaryFragment(value){
+ return typeof value==='string'?{t:value}:value;
+}
+function summaryText(value){
+ const fragment=summaryFragment(value);
+ return fragment?.t?articleText(fragment.t,fragment.ruby):'';
+}
+function articleSummaryHTML(article){
+ if(meta.summaryView==='body')return '';
+ const summary=getSummary(article);
+ if(!summary)return '';
+ const id=ESC(article.id),bodyHidden=meta.summaryView==='summary'&&!s.visibleBodies.has(article.id);
+ const label=summary.kind==='reviewed'?'学習解説':'条文から整理';
+ const points=(summary.points||[]).map(point=>`<li>${point.label?`<strong>${ESC(point.label)}</strong>`:''}<span>${summaryText(point)}</span>${Number.isInteger(point.block)?` <button type="button" class="rp-link rp-summary-jump" data-rp="summary-jump" data-id="${id}" data-block="${point.block}">該当箇所へ</button>`:''}</li>`).join('');
+ return `<section class="rp-summary" aria-label="${ESC(article.title)}の要約">
+  <div class="rp-summary-head"><h4>要約</h4><span class="rp-summary-label">${label}</span><button class="rp-button rp-secondary rp-summary-listen" type="button" data-rp="speak-summary" data-id="${id}" aria-label="${ESC(article.title)}の要約と解説を読む">🔊 要約・解説を読む</button></div>
+  <p class="rp-summary-gist">${summaryText(summary.summary)}</p>
+  <details class="rp-summary-details" data-rp-summary="${id}" ${s.summaryOpen.has(article.id)?'open':''}>
+   <summary>解説・確認ポイント</summary>
+   <div class="rp-summary-explanation">${summary.explanation?`<p>${summaryText(summary.explanation)}</p>`:''}${points?`<ul>${points}</ul>`:''}</div>
+  </details>
+  ${meta.summaryView==='summary'?`<button type="button" class="rp-link rp-summary-show-body" data-rp="summary-body" data-id="${id}" aria-expanded="${!bodyHidden}" aria-controls="rp-body-${id}">${bodyHidden?'条文本文を表示':'条文本文を閉じる'}</button>`:''}
+ </section>`;
+}
 function articleHTML(a){
  const marked=meta.marks.filter(m=>m.lawId===s.lawId&&m.articleId===a.id),book=meta.bookmarks.includes(bid(s.lawId,a.id));
  const key=bid(s.lawId,a.id),noteText=meta.notes[key]||'',noteOpen=s.noteIds.has(key);
  return `<article class="rp-article" id="rp-a-${ESC(a.id)}" data-article="${ESC(a.id)}" tabindex="-1"><div class="rp-article-top"><div class="rp-article-title"><div class="rp-topic">${articleText(a.heading|| (a.zone==='main'?'本則':'附則・別表'))}</div>${a.caption?`<div class="rp-caption">${articleText(a.caption,a.captionRuby)}</div>`:''}<h3>${articleText(a.title,a.titleRuby)}</h3></div><div class="rp-art-actions"><button class="rp-mini ${book?'is-active':''}" data-rp="bookmark" data-id="${ESC(a.id)}" aria-label="条文のしおり" aria-pressed="${book}" title="条文をブックマーク">${book?'★':'☆'}</button><button class="rp-mini" data-rp="speak-article" data-id="${ESC(a.id)}" title="条文を読み上げ" aria-label="${ESC(a.title)}を読み上げ">🔊</button><button class="rp-mini" data-rp="note-toggle" data-id="${ESC(a.id)}" title="条文メモ" aria-label="${ESC(a.title)}のメモ" aria-expanded="${noteOpen}">✎</button><button class="rp-mini" data-rp="copy-link" data-id="${ESC(a.id)}" aria-label="${ESC(a.title)}へのリンクをコピー" title="条文リンク">↗</button></div></div>
+ ${articleSummaryHTML(a)}
  ${GUIDE?.forArticle(s.lawId,a)||''}
- <div class="rp-article-body">${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b)}</p>`).join('')}</div>
+ <div class="rp-article-body" id="rp-body-${ESC(a.id)}" ${meta.summaryView==='summary'&&!s.visibleBodies.has(a.id)?'hidden':''}>${a.blocks.map((b,i)=>`<p class="rp-paragraph ${b.indent?'rp-indent':''}" tabindex="-1" data-rpblock="${i}" data-artid="${ESC(a.id)}">${markedContent(a,i,b)}</p>`).join('')}</div>
  <div class="rp-article-foot" ${marked.length?'':'hidden'}><span>${marked.length?`<span class="rp-foot-count">マーカー ${marked.length}件</span>`:''}</span>${marked.length?`<button class="rp-link" data-rp="marks-manage" data-id="${ESC(a.id)}">マーカーを管理</button>`:''}</div>
  <div class="rp-notebox ${noteText?'has-note':''}" id="rp-note-${ESC(a.id)}" ${noteOpen?'':'hidden'}><label for="rp-note-input-${ESC(a.id)}">✎ ${ESC(a.title)}の学習メモ（自動保存）</label><textarea id="rp-note-input-${ESC(a.id)}" class="rp-textarea" data-rp="note-input" data-id="${ESC(a.id)}" maxlength="4000" placeholder="判例・関連問題・覚え方を記録">${ESC(noteText)}</textarea><small>このメモは学習バックアップに含まれます。</small></div></article>`;
 }
@@ -639,6 +670,10 @@ function readerHTML(){
  ${s.readingPack?'':`<p>公式e-Govの本文を取得するか、法令XMLを取り込んで閲覧できます。</p><div class="rp-actions center"><button class="rp-button rp-primary" data-rp="fetch" ${s.loading||s.fetchingAll?'disabled':''}>公式本文を取得する</button><button class="rp-button rp-secondary" data-rp="choose-xml">XMLを取り込む</button></div>`}</div>`:
  `<div class="rp-readtools"><div class="rp-field"><label for="rp-textsearch">条番号・語句</label><input class="rp-input" type="search" id="rp-textsearch" value="${ESC(s.textFilter)}" placeholder="例：95、第一条、取消し"></div><div class="rp-field rp-scope"><label for="rp-scope">表示範囲</label><select class="rp-input" id="rp-scope" data-rp="scope"><option value="main" ${s.articleScope==='main'?'selected':''}>本則・前文</option><option value="suppl" ${s.articleScope==='suppl'?'selected':''}>附則</option><option value="appendix" ${s.articleScope==='appendix'?'selected':''}>別表・別記</option><option value="all" ${s.articleScope==='all'?'selected':''}>すべて</option></select></div></div>
  ${tocHTML(doc)}<div class="rp-filter-row"><button class="rp-filter ${s.onlyBookmarked?'active':''}" data-rp="only-book">しおり</button><button class="rp-filter ${s.onlyMarked?'active':''}" data-rp="only-mark">マーカー</button><span class="rp-results" role="status">${NF(counts.length)}件該当 · ${pg}/${pages}ページ</span></div>
+ <div class="rp-summary-toolbar" role="group" aria-label="条文と要約の表示">
+  <label for="rp-summary-view">表示</label><select id="rp-summary-view" class="rp-input">${[['both','要約と条文本文'],['summary','要約を先に表示'],['body','条文本文のみ']].map(([value,label])=>`<option value="${value}" ${meta.summaryView===value?'selected':''}>${label}</option>`).join('')}</select>
+  <button type="button" class="rp-button rp-secondary" data-rp="speak-summaries" ${counts.length?'':'disabled'}>▷ このページの要約を読む</button>
+ </div>
  <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page" ${counts.length?'':'disabled'}>▷ 表示中の条文を読む</button><button class="rp-button rp-ghost" data-rp="pause" id="rp-voice-pause" ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button><button class="rp-button rp-ghost" data-rp="stop" id="rp-voice-stop" ${speaking?'':'disabled'}>停止</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">${ESC(voiceStatus)}</span></div>
  ${bgmHTML()}
  <details class="rp-reader-controls" id="rp-reader-controls" ${s.controlsOpen?'open':''}><summary>音声・BGM設定とマーカー</summary>${soundSettingsHTML()}<div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文をドラッグ、または長押しして色を選びます。</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button></div></details>
@@ -918,7 +953,7 @@ function speakScreen(){
  if(!root)return;
  if(readerRoute()){
   selectionCapture();
-  if(s.selection.length)speechSelection();else speechPage();
+  if(s.selection.length)speechSelection();else if(meta.summaryView==='summary')speechSummaries();else speechPage();
   return;
  }
  const selection=window.getSelection?.();
@@ -950,6 +985,36 @@ function handleAudioClick(event){
 }
 function speechArticle(article){
  return {id:article.id,lawId:s.lawId,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
+}
+function summarySpeech(article,{details=false}={}){
+ const data=getSummary(article);
+ if(!data)return null;
+ const parts=[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},summaryFragment(data.summary)];
+ if(details){
+  parts.push(summaryFragment(data.explanation));
+  for(const point of data.points||[]){
+   if(point.label)parts.push({t:point.label});
+   parts.push(summaryFragment(point));
+  }
+ }
+ return {id:article.id,lawId:s.lawId,parts:parts.filter(part=>part?.t)};
+}
+function speechSummaries(){
+ const law=mem.get(s.lawId);
+ if(!law)return;
+ const visible=shownArticles(law).slice((s.page-1)*s.pageSize,s.page*s.pageSize);
+ startSpeech(visible.map(article=>summarySpeech(article)).filter(Boolean),{kind:'law-summary'});
+}
+function showArticleBody(id,show){
+ const body=EL('rp-body-'+id);
+ if(!body)return;
+ if(show)s.visibleBodies.add(id);else s.visibleBodies.delete(id);
+ body.hidden=!show;
+ const control=EL('rp-a-'+id)?.querySelector('[data-rp="summary-body"]');
+ if(control){
+  control.setAttribute('aria-expanded',String(show));
+  control.textContent=show?'条文本文を閉じる':'条文本文を表示';
+ }
 }
 function speechPage(){
  const law=mem.get(s.lawId);if(!law)return;
@@ -1049,6 +1114,21 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='close-manager'){EL('rp-mark-manager')?.remove();return;}
  if(op==='delete-mark'){meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
  if(op==='speak-article'){const article=getArticle(id);if(article)startSpeech([speechArticle(article)],{kind:'law'});return;}
+ if(op==='speak-summary'){
+  const article=getArticle(id),item=article&&summarySpeech(article,{details:true});
+  if(item)startSpeech([item],{kind:'law-summary'});
+  return;
+ }
+ if(op==='speak-summaries'){speechSummaries();return;}
+ if(op==='summary-body'){showArticleBody(id,EL('rp-body-'+id)?.hidden===true);return;}
+ if(op==='summary-jump'){
+  const body=EL('rp-body-'+id),target=body?.children[Number(el.dataset.block)];
+  if(target){
+   showArticleBody(id,true);
+   target.focus({preventScroll:true});target.scrollIntoView({block:'center'});
+  }
+  return;
+ }
  if(op==='speak-selection'){speechSelection();return;}
  if(op==='speak-page'){speechPage();return;}
  if(op==='toggle-bgm'){bgm.toggle();return;}
@@ -1074,6 +1154,12 @@ function handlerChange(ev){
  if(/^(?:rp|ga)-read-meanings$/.test(el.id)){meta.readTermMeanings=el.checked;syncAudioInputs();writeMeta();return;}
  if(/^(?:rp|ga)-rate$/.test(el.id)){meta.rate=Number(el.value)||1;syncAudioInputs();writeMeta();return;}
  if(!readerRoute())return;
+ if(el.id==='rp-summary-view'){
+  if(['both','summary','body'].includes(el.value)){
+   stopVoice();meta.summaryView=el.value;s.visibleBodies.clear();writeMeta();refresh({keepFocus:true});
+  }
+  return;
+ }
  if(el.id==='rp-scope'){stopVoice();s.articleScope=el.value;s.page=1;refresh({keepFocus:true});}
  if(el.id==='rp-toc'&&el.value)jumpTo(el.value);
  if(el.id==='rp-import'){const f=el.files?.[0];if(f)importXml(f);el.value='';}
@@ -1086,6 +1172,10 @@ function bind(){if(bound)return;bound=true;document.addEventListener('click',han
   if(event.target.id==='rp-reader-controls')s.controlsOpen=event.target.open;
   if(event.target.id==='rp-reading-rules')s.readingsOpen=event.target.open;
   if(event.target.id==='rp-add-tools')s.addOpen=event.target.open;
+  const article=event.target.dataset.rpSummary;
+  if(article&&event.target.isConnected){
+   if(event.target.open)s.summaryOpen.add(article);else s.summaryOpen.delete(article);
+  }
  },true);
  document.addEventListener('pointerdown',event=>{
   if(!readerRoute()||!s.selection.length)return;

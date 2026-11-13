@@ -1,5 +1,5 @@
 /* Offline files for this release, scoped to its GitHub Pages directory. */
-const release='20261113-r8';
+const release='20261113-r9';
 const scope=new URL(self.registration.scope);
 const prefix='shubiki-bunko:'+scope.pathname+':';
 const cacheName=prefix+release;
@@ -12,8 +12,8 @@ const ids=[
  '322AC0000000067','326AC1000000004','417AC0000000086','415AC0000000057','411AC0000000042','index'
 ];
 const files=new Set([
- ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','public.css','edition.css','questions.js','advanced_questions.js',
-     'app.js','roppo.js','study-cards.js','glossary-data.js','compound-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','local-voice.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
+ ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','public.css','edition.css','article-summary.css','questions.js','advanced_questions.js',
+     'app.js','roppo.js','study-cards.js','glossary-data.js','compound-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','local-voice.js','article-notes.js','article-summary.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
      .map(path=>new URL(path+'?v='+release,scope).href),
  music,
  ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png','assets/library-hero.webp','learn.html','laws.html','dictionary.html'].map(path=>new URL(path,scope).href)
