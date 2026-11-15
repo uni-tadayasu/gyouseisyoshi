@@ -1,0 +1,5 @@
+# Optional dependencies for tools/ocr-court-cases.py.
+# Poppler, Tesseract 5, and official jpn/jpn_vert traineddata are also required.
+Pillow>=11,<14
+numpy>=2,<3
+scipy>=1.14,<2

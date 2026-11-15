@@ -325,7 +325,9 @@ function essentialsHTML(progress,view){
   </section>
  </div>`;
 }
-function glossaryResults(view){
+const glossaryPageSize=60;
+let glossaryView=null;
+function glossaryMatches(view){
  const keyword=searchKey(view.search);
  const matchesGroup=term=>view.group==='all'||term.group===view.group||
   (view.group==='legal'&&term.legal)||(view.group==='compound'&&!term.legal);
@@ -336,12 +338,18 @@ function glossaryResults(view){
   const rank=({term})=>searchKey(term.name)===keyword||searchKey(term.reading)===keyword?0:searchKey(term.name).startsWith(keyword)?1:2;
   results.sort((a,b)=>rank(a)-rank(b));
  }
- const pageSize=60, pages=Math.max(1,Math.ceil(results.length/pageSize));
+ return results;
+}
+function glossaryResults(view){
+ glossaryView=view;
+ const results=glossaryMatches(view),pageSize=glossaryPageSize;
+ const pages=Math.max(1,Math.ceil(results.length/pageSize));
  const page=Math.max(1,Math.min(pages,view.page||1));
+ view.page=page;
  const visible=results.slice((page-1)*pageSize,page*pageSize);
  const count=`<p class="sg-result-count" role="status">${results.length.toLocaleString('ja-JP')}件</p>`;
  if(!visible.length)return count+'<p class="sg-empty">該当する用語がありません。表記や絞り込み条件を変えて検索できます。</p>';
- return count+`<ul class="sg-index-list">${visible.map(({term})=>`<li><button type="button" class="sg-index-item" data-guide-term="${esc(term.id)}">
+ return count+`<ul class="sg-index-list">${visible.map(({term})=>`<li><button type="button" id="sg-index-term-${esc(term.id)}" class="sg-index-item" data-guide-term="${esc(term.id)}">
    <span class="sg-index-word"><strong class="${termLine(term.legal)}">${esc(term.name)}</strong><small>${esc(term.reading)}</small></span>
    <span class="sg-index-open" aria-hidden="true">›</span>
   </button></li>`).join('')}</ul>${
@@ -353,6 +361,7 @@ function glossaryResults(view){
   }`;
 }
 function glossaryHTML(view){
+ glossaryView=view;
  return `<div class="sg-page">
   <header class="sg-header">
    <div><h1>用語辞典</h1><p>${glossary.terms.length.toLocaleString('ja-JP')}語を検索できます。用語を選ぶと、意味を表示して読み上げます。</p>${underlineLegend()}</div>
@@ -363,9 +372,46 @@ function glossaryHTML(view){
    <label for="sg-index-group">分類<select class="select" id="sg-index-group" data-action="glossaryGroup">${options([['all','すべての分類'],...Object.entries(glossary.groups)],view.group)}</select></label>
    <label for="sg-index-law">法令<select class="select" id="sg-index-law" data-action="glossaryLaw">${options([['all','すべての法令'],...Object.entries(laws).map(([key,[,name]])=>[key,name])],view.law)}</select></label>
   </div>
+  <section class="card" aria-label="用語の連続読み上げ">
+   <button type="button" class="button primary small" data-guide-read-results>ここから用語を読む</button>
+   <p class="small muted">表示中のページの先頭から、検索結果の読み方と意味を順番に読みます。連続再生では次のページにも進みます。</p>
+   ${window.GYOSHI_ROPPO?.playbackControlsHTML()||''}
+   <p class="ga-status" data-voice-state role="status">停止中</p>
+  </section>
   <div id="sg-index-results">${glossaryResults(view)}</div>
  </div>`;
 }
+function speakGlossary(){
+ if(!glossaryView||location.hash.split('?')[0]!=='#glossary')return;
+ const view=glossaryView,results=glossaryMatches(view);
+ const startIndex=(Math.max(1,view.page||1)-1)*glossaryPageSize;
+ const items=results.map(({term})=>({id:term.id,title:term.name,parts:[
+  {t:(term.reading||term.name)+'。意味。'},
+  ...(term.definitions||[term.meaning]).map(t=>({t})),
+  ...(term.example?[{t:'具体例。'+term.example}]:[])
+ ]}));
+ window.GYOSHI_ROPPO?.speakItems(items,{kind:'glossary',startIndex,withMeanings:false,onItem:(item,index)=>{
+  if(location.hash.split('?')[0]!=='#glossary'){window.GYOSHI_ROPPO?.stop();return;}
+  const page=Math.floor(index/glossaryPageSize)+1;
+  if(view.page!==page){
+   view.page=page;
+   const host=document.getElementById('sg-index-results');
+   if(host)host.innerHTML=glossaryResults(view);
+  }
+  document.getElementById('sg-index-term-'+item.id)?.scrollIntoView({block:'center',behavior:'instant'});
+ }});
+}
+window.addEventListener('gyoshi:playbackchange',event=>{
+ for(const element of document.querySelectorAll('.sg-index-item.rp-reading-now')){
+  element.classList.remove('rp-reading-now');element.removeAttribute('aria-current');
+ }
+ const {kind,id,speaking}=event.detail||{};
+ if(kind==='glossary'&&speaking&&id){
+  const element=document.getElementById('sg-index-term-'+id);
+  element?.classList.add('rp-reading-now');element?.setAttribute('aria-current','true');
+ }
+});
+
 let dialog,trigger;
 function shownExample(button){
  if(!button.classList.contains('sg-inline-term'))return '';
@@ -428,6 +474,7 @@ function openTerm(id,button){
  audio?.speakMeaning(term);
 }
 document.addEventListener('click',event=>{
+ if(event.target.closest('[data-guide-read-results]')){speakGlossary();return;}
  const button=event.target.closest('[data-guide-term]');
  if(!button)return;
  if(button.classList.contains('sg-inline-term')){
@@ -446,7 +493,7 @@ document.addEventListener('keydown',event=>{
 window.addEventListener('hashchange',()=>{if(dialog?.open)dialog.close();});
 
 window.GYOSHI_GUIDE={
- cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,forArticle,inlineText,termsIn,underlineLegend,
+ cleanProgress,essentialsHTML,glossaryHTML,glossaryResults,speakGlossary,forArticle,inlineText,termsIn,underlineLegend,
  getTerm:id=>termById.get(id),
  getCard:id=>cardById.get(id),lawKey:id=>Object.keys(laws).find(key=>laws[key][0]===id)
 };
