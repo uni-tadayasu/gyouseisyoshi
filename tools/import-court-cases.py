@@ -190,7 +190,7 @@ def build(args):
         text=clean_text(cached.get('text') or original.get('contents'))
         status=(cached.get('status') if cached.get('status') in ('ocr','ocr-partial') else 'text') if len(text)>=20 else cached.get('status','text-unavailable')
         if status in ('text','ocr','ocr-partial'):texts[ident]=text;body_count+=1
-        else:missing.append({'id':ident,'status':status,'pdfUrl':current.get('pdfUrl','')})
+        else:missing.append({'id':ident,'status':status,'pdfUrl':current.get('pdfUrl',''),'reason':cached.get('sourceUnavailableReason','')})
         statuses[status]=statuses.get(status,0)+1
         primary=current.get('category') or CATEGORY.get(original.get('trial_type'),'裁判例')
         record={
@@ -207,6 +207,7 @@ def build(args):
           'result':current.get('result') or original.get('result',''),
         }
         if status in ('text','ocr','ocr-partial'):record['textSource']='official-pdf-ocr' if status in ('ocr','ocr-partial') else 'official-pdf' if cached.get('text') else 'cc0-court-pdf-transcription'
+        elif cached.get('sourceUnavailableReason'):record['textUnavailableReason']=str(cached['sourceUnavailableReason'])
         if status in ('ocr','ocr-partial'):
             ocr=cached.get('ocr') or {}
             record['ocrFailedPages']=ocr.get('failedPages',[])
