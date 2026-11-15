@@ -1,10 +1,11 @@
 /* Offline files for this release, scoped to its GitHub Pages directory. */
-const release='20261113-r9';
+const release='20261116-r10';
 const scope=new URL(self.registration.scope);
 const prefix='shubiki-bunko:'+scope.pathname+':';
 const cacheName=prefix+release;
 const index=new URL('index.html',scope).href;
 const voiceDirectory=new URL('assets/voice/',scope).pathname;
+const caseDirectory=new URL('cases/',scope).pathname;
 const music=new URL('assets/hear-your-voice.mp3?v='+release,scope).href;
 const ids=[
  '321CONSTITUTION','129AC0000000089','140AC0000000045','132AC0000000048','408AC0000000109',
@@ -12,8 +13,8 @@ const ids=[
  '322AC0000000067','326AC1000000004','417AC0000000086','415AC0000000057','411AC0000000042','index'
 ];
 const files=new Set([
- ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','public.css','edition.css','article-summary.css','questions.js','advanced_questions.js',
-     'app.js','roppo.js','study-cards.js','glossary-data.js','compound-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','local-voice.js','article-notes.js','article-summary.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
+ ...['style.css','roppo.css','atelier.css','reading.css','study-guide.css','public.css','edition.css','article-summary.css','case-law.css','questions.js','advanced_questions.js',
+     'app.js','case-law.js','case-law-notes.js','roppo.js','study-cards.js','glossary-data.js','compound-data.js','study-guide.js','law-edition.js','law-voice.js','reader-bgm.js','local-voice.js','article-notes.js','article-summary.js','assets/pako_inflate.min.js',...ids.map(id=>'laws/'+id+'.js')]
      .map(path=>new URL(path+'?v='+release,scope).href),
  music,
  ...['manifest.webmanifest','assets/icon-192.png','assets/icon-512.png','assets/library-hero.webp','learn.html','laws.html','dictionary.html'].map(path=>new URL(path,scope).href)
@@ -58,7 +59,7 @@ self.addEventListener('fetch',event=>{
    }catch{}
    return await (await caches.open(cacheName)).match(index)||Response.error();
   })());
- }else if(url.pathname.startsWith(voiceDirectory)){
+ }else if(url.pathname.startsWith(voiceDirectory)||url.pathname.startsWith(caseDirectory)){
   event.respondWith((async()=>{
    const cache=await caches.open(cacheName);
    const cached=await cache.match(request);

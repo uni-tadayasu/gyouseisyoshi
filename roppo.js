@@ -91,7 +91,7 @@ function fingerprint(text){
 }
 function fresh(){
  return {marks:[],bookmarks:[],notes:{},rate:1,voice:'',lastLaw:'321CONSTITUTION',custom:[],positions:{},
-  voiceVolume:100,bgmVolume:22,bgmDuck:true,readTermMeanings:false,readings:[],summaryView:'both'};
+  voiceVolume:100,bgmVolume:22,bgmDuck:true,continuousPlayback:true,readTermMeanings:false,readings:[],summaryView:'both'};
 }
 function volumePercent(value,fallback){
  return typeof value==='number'&&Number.isFinite(value)?Math.round(Math.max(0,Math.min(100,value))):fallback;
@@ -106,6 +106,7 @@ function cleanMeta(m){
  f.voiceVolume=volumePercent(m.voiceVolume,f.voiceVolume);
  f.bgmVolume=volumePercent(m.bgmVolume,f.bgmVolume);
  f.bgmDuck=m.bgmDuck!==false;
+ f.continuousPlayback=m.continuousPlayback!==false;
  f.readTermMeanings=m.readTermMeanings===true;
  f.summaryView=['both','summary','body'].includes(m.summaryView)?m.summaryView:'both';
  f.readings=LAW_VOICE.cleanReadings(m.readings);
@@ -540,6 +541,9 @@ function syncAudioInputs(){
   if(voice)voice.value=meta.voice;
   if(rate)rate.value=meta.rate;
  }
+ for(const input of document.querySelectorAll('[data-audio-continuous]')){
+  input.checked=meta.continuousPlayback;
+ }
 }
 function bgmLabel(){
  const playing=['playing','loading','interrupted'].includes(bgm.state);
@@ -570,15 +574,22 @@ function meaningAudioHTML(){
 function ratesHTML(id){
  return `<select id="${id}" class="rp-input" aria-label="読み上げ速度">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,label])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${label}</option>`).join('')}</select>`;
 }
+function playbackControlsHTML(){
+ return `<div class="ga-controls" role="group" aria-label="連続読み上げの操作">
+  <button type="button" class="button secondary small" data-audio="previous" data-voice-previous ${playbackQueue&&playbackQueue.index>0?'':'disabled'}>前の項目</button>
+  <button type="button" class="button secondary small" data-audio="next" data-voice-next ${playbackQueue&&playbackQueue.index<playbackQueue.items.length-1?'':'disabled'}>次の項目</button>
+  <button type="button" class="button secondary small" data-audio="pause" data-voice-pause ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button>
+  <button type="button" class="button secondary small" data-audio="stop" data-voice-stop ${speaking||playbackQueue?'':'disabled'}>停止</button>
+ </div><label class="rp-duck-setting"><input type="checkbox" data-audio-continuous ${meta.continuousPlayback?'checked':''}>次の項目へ連続再生</label>`;
+}
 function globalAudioHTML(){
  return `<details class="ga-tools" id="ga-tools">
   <summary class="icon-btn" aria-label="音声・BGMの操作" title="音声・BGMの操作">音声</summary>
   <div class="ga-panel">
    <div class="ga-controls">
     <button type="button" class="button primary small" data-audio="read-screen">この画面を読む</button>
-    <button type="button" class="button secondary small" data-audio="pause" data-voice-pause ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button>
-    <button type="button" class="button secondary small" data-audio="stop" data-voice-stop ${speaking?'':'disabled'}>停止</button>
    </div>
+   ${playbackControlsHTML()}
    <p class="ga-status" data-voice-state role="status">${ESC(voiceStatus)}</p>
    ${bgmHTML()}
    <div class="ga-levels">
@@ -672,9 +683,10 @@ function readerHTML(){
  ${tocHTML(doc)}<div class="rp-filter-row"><button class="rp-filter ${s.onlyBookmarked?'active':''}" data-rp="only-book">しおり</button><button class="rp-filter ${s.onlyMarked?'active':''}" data-rp="only-mark">マーカー</button><span class="rp-results" role="status">${NF(counts.length)}件該当 · ${pg}/${pages}ページ</span></div>
  <div class="rp-summary-toolbar" role="group" aria-label="条文と要約の表示">
   <label for="rp-summary-view">表示</label><select id="rp-summary-view" class="rp-input">${[['both','要約と条文本文'],['summary','要約を先に表示'],['body','条文本文のみ']].map(([value,label])=>`<option value="${value}" ${meta.summaryView===value?'selected':''}>${label}</option>`).join('')}</select>
-  <button type="button" class="rp-button rp-secondary" data-rp="speak-summaries" ${counts.length?'':'disabled'}>▷ このページの要約を読む</button>
+  <button type="button" class="rp-button rp-secondary" data-rp="speak-summaries" ${counts.length?'':'disabled'}>▷ ここから要約を読む</button>
  </div>
- <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page" ${counts.length?'':'disabled'}>▷ 表示中の条文を読む</button><button class="rp-button rp-ghost" data-rp="pause" id="rp-voice-pause" ${speaking?'':'disabled'}>${paused?'再開':'一時停止'}</button><button class="rp-button rp-ghost" data-rp="stop" id="rp-voice-stop" ${speaking?'':'disabled'}>停止</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">${ESC(voiceStatus)}</span></div>
+ <div class="rp-voicebar" role="group" aria-label="日本語読み上げ"><span class="rp-voiceicon">🔊</span><label for="rp-rate">読み上げ速度</label><select class="rp-input rp-rate" id="rp-rate" data-rp="rate">${[[.7,'0.7倍'],[.85,'0.85倍'],[1,'標準'],[1.15,'1.15倍'],[1.3,'1.3倍'],[1.5,'1.5倍']].map(([n,t])=>`<option value="${n}" ${meta.rate===n?'selected':''}>${t}</option>`).join('')}</select><button class="rp-button rp-secondary" data-rp="speak-page" ${counts.length?'':'disabled'}>▷ ここから条文を読む</button><span class="rp-muted rp-tts-state" id="rp-tts-state" role="status">${ESC(voiceStatus)}</span></div>
+ ${playbackControlsHTML()}
  ${bgmHTML()}
  <details class="rp-reader-controls" id="rp-reader-controls" ${s.controlsOpen?'open':''}><summary>音声・BGM設定とマーカー</summary>${soundSettingsHTML()}<div class="rp-annotation-tools"><div class="rp-annotation-label"><strong>マーカー線</strong><span>条文をドラッグ、または長押しして色を選びます。</span></div><div class="rp-color-row" aria-label="マーカー線の色">${[['yellow','黄'],['mint','緑'],['pink','桃'],['blue','青']].map(([c,t])=>`<button class="rp-paint rp-paint-${c}" data-rp="mark" data-color="${c}" title="選択範囲に${t}色のマーカー線" aria-label="${t}色のマーカー線"><span></span>${t}</button>`).join('')}</div><button class="rp-button rp-ghost rp-speak-selection" data-rp="speak-selection">🔊 選択文を読む</button></div></details>
  <div class="rp-read-meta"><p>本文：${ESC(doc.source)}。条文は学習用に整形して表示します。公式の脚注・図表等は原文で確認してください。</p></div>
@@ -788,7 +800,7 @@ function markSelected(color){selectionCapture();if(!s.selection.length){note('�
 function getArticle(id){return mem.get(s.lawId)?.articles.find(x=>x.id===id);}
 function nativeSpeech(){return typeof window.speechSynthesis!=='undefined'&&typeof window.SpeechSynthesisUtterance!=='undefined';}
 let speaking=false,paused=false,speakTokens=0,segments=[],segIndex=0,utterance=null,voiceStatus='停止中',activeSpeechArticle='',voiceKind='';
-let voiceEngine='',localPlayer=null,localPending=false,outputContext=null;
+let voiceEngine='',localPlayer=null,localPending=false,outputContext=null,playbackQueue=null,queueController=null,queuePending=false;
 function japaneseVoices(){
  return (window.speechSynthesis?.getVoices?.()||[]).filter(voice=>/^ja(?:-|_|$)/i.test(voice.lang));
 }
@@ -796,25 +808,33 @@ function voicesHTML(){
  const builtIn=LOCAL_VOICE?.available?`<option value="builtin-ja" ${meta.voice==='builtin-ja'?'selected':''}>内蔵日本語音声</option>`:'';
  return '<option value="">自動（端末音声・BGM対応）</option>'+builtIn+japaneseVoices().map(voice=>`<option value="${ESC(voice.voiceURI)}" ${voice.voiceURI===meta.voice?'selected':''}>${ESC(voice.name)}</option>`).join('');
 }
+function speechElement(id){return EL('rp-a-'+id)||EL('sg-card-title-'+id)?.closest('.sg-card');}
 function indicateSpeech(id){
- if(activeSpeechArticle)EL('rp-a-'+activeSpeechArticle)?.classList.remove('rp-reading-now');
+ if(activeSpeechArticle)speechElement(activeSpeechArticle)?.classList.remove('rp-reading-now');
  activeSpeechArticle=id;
- if(id)EL('rp-a-'+id)?.classList.add('rp-reading-now');
+ if(id)speechElement(id)?.classList.add('rp-reading-now');
 }
 function voiceState(t){
- voiceStatus=t;
+ voiceStatus=t+(playbackQueue?' · '+(playbackQueue.index+1)+' / '+playbackQueue.items.length+'項目'+(playbackQueue.items[playbackQueue.index].title?' · '+playbackQueue.items[playbackQueue.index].title:''):'');
  bgm.setSpeaking(speaking&&!paused&&Boolean(utterance||localPlayer||(localPending&&segIndex>1))&&meta.voiceVolume>0);
- for(const label of document.querySelectorAll('#rp-tts-state,[data-voice-state]'))label.textContent=t;
+ for(const label of document.querySelectorAll('#rp-tts-state,[data-voice-state]'))label.textContent=voiceStatus;
  for(const control of document.querySelectorAll('#rp-voice-pause,[data-voice-pause]')){
   control.disabled=!speaking;control.textContent=paused?'再開':'一時停止';
  }
  for(const control of document.querySelectorAll('#rp-voice-stop,[data-voice-stop]')){
-  control.disabled=!speaking||(control.dataset.audio==='stop-meaning'&&voiceKind!=='meaning');
+  control.disabled=(!speaking&&!playbackQueue)||(control.dataset.audio==='stop-meaning'&&voiceKind!=='meaning');
  }
+ for(const control of document.querySelectorAll('[data-voice-previous]'))control.disabled=!playbackQueue||playbackQueue.index<=0;
+ for(const control of document.querySelectorAll('[data-voice-next]'))control.disabled=!playbackQueue||playbackQueue.index>=playbackQueue.items.length-1;
+ window.dispatchEvent(new CustomEvent('gyoshi:playbackchange',{detail:{
+  kind:voiceKind,id:speaking?playbackQueue?.items[playbackQueue.index]?.id||activeSpeechArticle:'',
+  speaking,paused,index:playbackQueue?.index??-1,total:playbackQueue?.items.length||0,status:voiceStatus
+ }}));
 }
 function stopVoice(){
  const native=voiceEngine==='native'&&speaking;
- ++speakTokens;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;voiceKind='';voiceEngine='';localPending=false;indicateSpeech('');
+ queueController?.abort();queueController=null;queuePending=false;
+ ++speakTokens;playbackQueue=null;segments=[];segIndex=0;utterance=null;speaking=false;paused=false;voiceKind='';voiceEngine='';localPending=false;indicateSpeech('');
  localPlayer?.stop();localPlayer=null;
  if(native)try{
   window.speechSynthesis?.cancel();
@@ -852,7 +872,7 @@ function splitSpeech(value){
   }
   if(remaining)chunks.push(remaining);
  }
- return chunks.slice(0,1500);
+ return chunks;
 }
 function getVoice(){
  const voices=japaneseVoices();
@@ -891,6 +911,9 @@ function playLocal(segment,token){
 function speakNext(token){
  if(token!==speakTokens||paused||utterance||localPending||localPlayer)return;
  if(segIndex>=segments.length){
+  if(playbackQueue&&(playbackQueue.continuous??meta.continuousPlayback)&&playbackQueue.index+1<playbackQueue.items.length){
+   playQueueItem(playbackQueue,playbackQueue.index+1);return;
+  }
   speaking=false;paused=false;voiceKind='';voiceEngine='';indicateSpeech('');voiceState('読み上げ完了');return;
  }
  const segment=segments[segIndex++];
@@ -914,7 +937,7 @@ function meaningParts(term){
  return [{t:reading+'。意味。'},...(term.definitions||[term.meaning]).map(meaning=>({t:meaning}))];
 }
 const appleMobile=/iPad|iPhone|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}){
+function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings,queue=null,initialPaused=false}={}){
  stopVoice();
  const mediaSession=bgm.beforeSpeech();
  outputContext=LOCAL_VOICE?.available?bgm.voiceOutput():null;
@@ -927,7 +950,7 @@ function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}
  const useLocal=outputContext&&(meta.voice==='builtin-ja'||!deviceVoice||automaticLocal);
  voiceEngine=useLocal?'local':'native';
  const pronounce=LAW_VOICE.reader(meta.readings);
- const explained=new Set();
+ const explained=queue?.explained||new Set();
  segments=items.flatMap(item=>{
   const utterances=[];
   for(const part of item.parts){
@@ -943,8 +966,49 @@ function startSpeech(items,{kind='screen',withMeanings=meta.readTermMeanings}={}
   return splitSpeech(utterances.join('\n')).map(text=>({id:item.id||'',text}));
  });
  if(!segments.length){voiceEngine='';voiceState('読み上げる文章がありません');return;}
- voiceKind=kind;speaking=true;paused=false;speakNext(speakTokens);
+ playbackQueue=queue;
+ voiceKind=kind;speaking=true;paused=initialPaused;
+ const token=speakTokens;
+ if(queue?.onItem){
+  try{queue.onItem(queue.items[queue.index],queue.index);}
+  catch(error){stopVoice();voiceState('読み上げる項目を表示できませんでした');console.warn(error);return;}
+ }
+ // A navigation/stop inside the item callback must not restart old playback.
+ if(token===speakTokens){if(paused)voiceState('一時停止中');else speakNext(token);}
 }
+function playQueueItem(queue,index){
+ if(!queue||index<0||index>=queue.items.length)return;
+ queue.index=index;
+ const item=queue.items[index],options={kind:queue.kind,withMeanings:queue.withMeanings,queue};
+ if(!queue.resolveItem){startSpeech([item],options);return;}
+ stopVoice();playbackQueue=queue;voiceKind=queue.kind;speaking=true;queuePending=true;
+ const token=speakTokens,controller=new AbortController();queueController=controller;
+ voiceState('本文を準備中');
+ Promise.resolve().then(()=>{
+  if(token!==speakTokens)return null;
+  return queue.resolveItem(item,index,{signal:controller.signal});
+ }).then(resolved=>{
+  if(token!==speakTokens)return;
+  const wasPaused=paused;
+  queuePending=false;queueController=null;
+  startSpeech([{...item,...resolved}],{...options,initialPaused:wasPaused});
+ }).catch(error=>{
+  if(token!==speakTokens)return;
+  queuePending=false;queueController=null;speaking=false;paused=false;voiceKind='';
+  voiceState('本文を取得できませんでした。もう一度再生してください');
+  console.warn(error);
+ });
+}
+function speakItems(items,{kind='screen',startIndex=0,onItem=null,resolveItem=null,continuous,withMeanings=meta.readTermMeanings}={}){
+ const source=Array.isArray(items)?items:[];
+ const requested=Math.max(0,Math.min(source.length-1,Math.floor(Number(startIndex)||0)));
+ const valid=source.map((item,index)=>({item,index})).filter(({item})=>
+  item&&typeof item==='object'&&(resolveItem||(Array.isArray(item.parts)&&item.parts.some(part=>String(part?.t||'').trim()))));
+ const index=valid.findIndex(entry=>entry.index>=requested),available=valid.map(entry=>entry.item);
+ if(index<0){stopVoice();voiceState('読み上げる文章がありません');return;}
+ playQueueItem({items:available,index,kind,onItem,resolveItem,continuous,withMeanings,explained:new Set()},index);
+}
+function skipSpeech(offset){if(playbackQueue)playQueueItem(playbackQueue,playbackQueue.index+offset);}
 function speakMeaning(term){
  if(term)startSpeech([{parts:meaningParts(term)}],{kind:'meaning',withMeanings:false});
 }
@@ -959,21 +1023,38 @@ function speakScreen(){
  const selection=window.getSelection?.();
  const range=selection?.rangeCount?selection.getRangeAt(0):null;
  const selected=range&&root.contains(range.commonAncestorContainer)?String(selection).trim():'';
+ if(!selected){
+  const route=location.hash.split('?')[0];
+  if(route==='#cases'&&window.GYOSHI_CASES?.speak){window.GYOSHI_CASES.speak();return;}
+  if(route==='#glossary'&&GUIDE?.speakGlossary){GUIDE.speakGlossary();return;}
+  const firstCard=root.querySelector('[data-audio="read-card"]');
+  if(route==='#essentials'&&firstCard){speakCard(firstCard);return;}
+ }
  const lines=(selected||root.innerText).split(/\n+/).map(text=>text.trim()).filter(Boolean);
  startSpeech([{parts:lines.map(t=>({t}))}]);
 }
 function speakCard(control){
+ const cards=[...document.querySelectorAll('#content .sg-card')];
  const card=control.closest('.sg-card');
  if(!card)return;
  const visible=['.sg-card-title-line h4','.sg-card-prompt p','.sg-card-details[open] .sg-answer p','.sg-card-details[open] .sg-point p'];
- const parts=visible.map(query=>({t:card.querySelector(query)?.textContent||''}));
- startSpeech([{parts}]);
+ const items=cards.map(element=>({
+  id:element.querySelector('[data-guide-card]')?.dataset.guideCard||'',
+  title:element.querySelector('h4')?.textContent||'',
+  parts:visible.map(query=>({t:element.querySelector(query)?.textContent||''}))
+ }));
+ speakItems(items,{kind:'card',startIndex:cards.indexOf(card),onItem:item=>{
+  const element=EL('sg-card-title-'+item.id)?.closest('.sg-card');
+  element?.scrollIntoView({block:'center',behavior:'instant'});
+ }});
 }
 function handleAudioClick(event){
  const control=event.target.closest('[data-audio]');
  if(!control)return;
  switch(control.dataset.audio){
   case 'read-screen':speakScreen();break;
+  case 'previous':skipSpeech(-1);break;
+  case 'next':skipSpeech(1);break;
   case 'test-voice':startSpeech([{parts:[{t:'条文を声に出して読むと、理解が深まります。相殺、先取特権、そして競売。ここでいう競売とは、入札などで売却する手続です。'}]}],{kind:'sample',withMeanings:false});break;
   case 'read-card':speakCard(control);break;
   case 'replay-meaning':speakMeaning(GUIDE?.getTerm(control.closest('[data-term-id]')?.dataset.termId));break;
@@ -984,7 +1065,7 @@ function handleAudioClick(event){
  }
 }
 function speechArticle(article){
- return {id:article.id,lawId:s.lawId,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
+ return {id:article.id,title:article.title,lawId:s.lawId,parts:[{t:article.title,ruby:article.titleRuby},{t:article.caption,ruby:article.captionRuby},...article.blocks]};
 }
 function summarySpeech(article,{details=false}={}){
  const data=getSummary(article);
@@ -997,14 +1078,23 @@ function summarySpeech(article,{details=false}={}){
    parts.push(summaryFragment(point));
   }
  }
- return {id:article.id,lawId:s.lawId,parts:parts.filter(part=>part?.t)};
+ return {id:article.id,title:article.title,lawId:s.lawId,parts:parts.filter(part=>part?.t)};
 }
-function speechSummaries(){
+function speechLaw({id='',summary=false,details=false}={}){
  const law=mem.get(s.lawId);
  if(!law)return;
- const visible=shownArticles(law).slice((s.page-1)*s.pageSize,s.page*s.pageSize);
- startSpeech(visible.map(article=>summarySpeech(article)).filter(Boolean),{kind:'law-summary'});
+ const articles=shownArticles(law);
+ const start=id?articles.findIndex(article=>article.id===id):(s.page-1)*s.pageSize;
+ if(start<0)return;
+ const items=articles.map(article=>summary?summarySpeech(article,{details}):speechArticle(article));
+ speakItems(items,{kind:summary?'law-summary':'law',startIndex:start,onItem:item=>{
+  const position=articles.findIndex(article=>article.id===item.id),page=Math.floor(position/s.pageSize)+1;
+  if(s.page!==page){s.page=page;refresh({scroll:false});}
+  meta.positions[law.id]=item.id;writeMeta();
+  EL('rp-a-'+item.id)?.scrollIntoView({block:'start',behavior:'instant'});
+ }});
 }
+function speechSummaries(){speechLaw({summary:true});}
 function showArticleBody(id,show){
  const body=EL('rp-body-'+id);
  if(!body)return;
@@ -1016,11 +1106,7 @@ function showArticleBody(id,show){
   control.textContent=show?'条文本文を閉じる':'条文本文を表示';
  }
 }
-function speechPage(){
- const law=mem.get(s.lawId);if(!law)return;
- const visible=shownArticles(law).slice((s.page-1)*s.pageSize,s.page*s.pageSize);
- startSpeech(visible.map(speechArticle),{kind:'law'});
-}
+function speechPage(){speechLaw();}
 function speechSelection(){
  selectionCapture();
  const items=[];
@@ -1040,6 +1126,7 @@ function togglePause(){
  if(!speaking){note('先に読み上げを開始してください。');return;}
  try{
   paused=!paused;
+  if(queuePending){voiceState(paused?'一時停止中（本文を準備中）':'本文を準備中');return;}
   if(voiceEngine==='local'){
    if(paused)localPlayer?.pause();
    else{
@@ -1097,10 +1184,10 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='bulk'){fetchSix();return;}
  if(op==='choose-xml'){EL('rp-import')?.click();return;}
  if(op==='page'){stopVoice();s.page=Number(el.dataset.page)||1;const first=shownArticles(mem.get(s.lawId))[(s.page-1)*s.pageSize];if(first){meta.positions[s.lawId]=first.id;writeMeta();}refresh({scroll:false});EL('rp-articles')?.scrollIntoView({behavior:'instant',block:'start'});return;}
- if(op==='only-mark'){s.onlyMarked=!s.onlyMarked;s.page=1;refresh();return;}
- if(op==='only-book'){s.onlyBookmarked=!s.onlyBookmarked;s.page=1;refresh();return;}
+ if(op==='only-mark'){stopVoice();s.onlyMarked=!s.onlyMarked;s.page=1;refresh();return;}
+ if(op==='only-book'){stopVoice();s.onlyBookmarked=!s.onlyBookmarked;s.page=1;refresh();return;}
  if(op==='mark'){markSelected(el.dataset.color);return;}
- if(op==='bookmark'){const key=bid(s.lawId,id),at=meta.bookmarks.indexOf(key);if(at<0)meta.bookmarks.push(key);else meta.bookmarks.splice(at,1);writeMeta();refresh();note(at<0?'条文をブックマークしました。':'ブックマークを外しました。');return;}
+ if(op==='bookmark'){if(s.onlyBookmarked)stopVoice();const key=bid(s.lawId,id),at=meta.bookmarks.indexOf(key);if(at<0)meta.bookmarks.push(key);else meta.bookmarks.splice(at,1);writeMeta();refresh();note(at<0?'条文をブックマークしました。':'ブックマークを外しました。');return;}
  if(op==='note-toggle'){
   const box=EL('rp-note-'+id),key=bid(s.lawId,id);
   if(box){
@@ -1112,11 +1199,10 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  }
  if(op==='marks-manage'){manageMarks(id);return;}
  if(op==='close-manager'){EL('rp-mark-manager')?.remove();return;}
- if(op==='delete-mark'){meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
- if(op==='speak-article'){const article=getArticle(id);if(article)startSpeech([speechArticle(article)],{kind:'law'});return;}
+ if(op==='delete-mark'){if(s.onlyMarked)stopVoice();meta.marks=meta.marks.filter(x=>x.id!==id);writeMeta();EL('rp-mark-manager')?.remove();refresh();note('マーカーを削除しました。');return;}
+ if(op==='speak-article'){speechLaw({id});return;}
  if(op==='speak-summary'){
-  const article=getArticle(id),item=article&&summarySpeech(article,{details:true});
-  if(item)startSpeech([item],{kind:'law-summary'});
+  speechLaw({id,summary:true,details:true});
   return;
  }
  if(op==='speak-summaries'){speechSummaries();return;}
@@ -1135,7 +1221,7 @@ function handlerClick(ev){const el=ev.target.closest('[data-rp]');if(!el||!EL('c
  if(op==='remove-reading'){removeReading(id);return;}
  if(op==='pause'){togglePause();return;}
  if(op==='stop'){stopVoice();return;}
- if(op==='delete-law'){if(!confirm(`${selectedInfo().name}の保存済み本文を端末から削除しますか？\nマーカー・メモ・ブックマークは残ります。`))return;const lawId=s.lawId;mem.delete(lawId);storeDelete(lawId).then(()=>{refresh();note('本文データを削除しました。');}).catch(()=>note('保存済み本文を削除できませんでした。','bad'));refresh();return;}
+ if(op==='delete-law'){if(!confirm(`${selectedInfo().name}の保存済み本文を端末から削除しますか？\nマーカー・メモ・ブックマークは残ります。`))return;stopVoice();const lawId=s.lawId;mem.delete(lawId);storeDelete(lawId).then(()=>{refresh();note('本文データを削除しました。');}).catch(()=>note('保存済み本文を削除できませんでした。','bad'));refresh();return;}
 }
 function handlerInput(ev){const el=ev.target;
  if(updateVolume(el)||!readerRoute())return;
@@ -1148,6 +1234,7 @@ function handlerInput(ev){const el=ev.target;
 }
 function handlerChange(ev){
  const el=ev.target;
+ if(el.matches('[data-audio-continuous]')){meta.continuousPlayback=el.checked;syncAudioInputs();writeMeta();return;}
  if(updateVolume(el)){writeMeta();return;}
  if(/^(?:rp|ga)-voice$/.test(el.id)){meta.voice=el.value;syncAudioInputs();writeMeta();return;}
  if(/^(?:rp|ga)-bgm-duck$/.test(el.id)){meta.bgmDuck=el.checked;syncAudioInputs();syncBgmSettings();writeMeta();return;}
@@ -1211,6 +1298,6 @@ function importMeta(data){
  handledHash=null;stopReaderAudio();syncBgmSettings();syncAudioInputs();refresh();return true;
 }
 function resetMeta(){meta=fresh();s.lawId=meta.lastLaw;handledHash=null;writeMeta();stopReaderAudio();syncBgmSettings();syncAudioInputs();refresh();}
-window.GYOSHI_ROPPO={render:display,bind,stop:stopVoice,globalAudioHTML,meaningAudioHTML,speakMeaning,stopMeaning,references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s}};
+window.GYOSHI_ROPPO={render:display,bind,stop:stopVoice,speakItems,playbackControlsHTML,globalAudioHTML,meaningAudioHTML,speakMeaning,stopMeaning,references,exportMeta,importMeta,resetMeta,getCatalog:allLaws,__test:{readXml,splitSpeech,shownArticles,normalizeText,cleanMeta,meta:()=>meta,mem,s,startSpeech,speakItems,skipSpeech,togglePause,speechLaw,playback:()=>({speaking,paused,queue:playbackQueue,voiceStatus,segIndex})}};
 bind();
 })();

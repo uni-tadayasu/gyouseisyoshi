@@ -82,7 +82,7 @@ body { background:radial-gradient(ellipse at 100% 0%,var(--surface),transparent 
 .hero-collection dt { font-size:11px; color:#f1d9b7; white-space:nowrap; }
 .hero-collection dd { margin:0; font:700 clamp(22px,3vw,38px)/1.25 Georgia,var(--serif); font-variant-numeric:tabular-nums; }
 .hero-collection dd span { font:650 11px var(--ui-font); margin-inline-start:4px; white-space:nowrap; }
-.study-shelves { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin-block:0 26px; }
+.study-shelves { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:11px; margin-block:0 26px; }
 .study-shelf {
   display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:11px; align-items:center; min-width:0;
   border:1px solid var(--line); background:var(--surface); color:var(--ink); box-shadow:var(--shadow);
